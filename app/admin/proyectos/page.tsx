@@ -167,7 +167,7 @@ export default function ProyectosPage() {
   const projectToDelete = crud.items.find((p) => p.id === crud.deleteConfirmId)
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 page-enter">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Proyectos</h1>
@@ -204,14 +204,14 @@ export default function ProyectosPage() {
         </Select>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 stagger-children">
         {filtered.map((project) => {
           const client = mockClients.find((c) => c.id === project.clientId)
           const assignedUsers = mockUsers.filter((u) => project.assignedWorkers.includes(u.id))
           const progress = getProjectProgress(project)
 
           return (
-            <Card key={project.id}>
+            <Card key={project.id} className="card-hover">
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">

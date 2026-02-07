@@ -88,7 +88,7 @@ export default function UsuariosPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 page-enter">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Usuarios</h1>
@@ -113,7 +113,7 @@ export default function UsuariosPage() {
       </div>
 
       {/* Desktop Table */}
-      <div className="hidden md:block rounded-lg border border-border overflow-hidden">
+      <div className="hidden md:block rounded-lg border border-border overflow-hidden animate-fade-in-up">
         <Table>
           <TableHeader>
             <TableRow>

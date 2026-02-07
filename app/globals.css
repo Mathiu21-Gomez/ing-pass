@@ -17,7 +17,8 @@
     --card-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
-    --primary: 221 83% 53%;          /* Azul corporativo */
+    --primary: 221 83% 53%;
+    /* Azul corporativo */
     --primary-foreground: 210 40% 98%;
     --secondary: 210 40% 96%;
     --secondary-foreground: 222 47% 11%;
@@ -37,15 +38,16 @@
     --chart-5: 340 75% 55%;
     --radius: 0.5rem;
 
-    /* === SIDEBAR CORPORATIVO (navy + dorado) === */
+    /* === SIDEBAR CORPORATIVO (navy + rosado light / blanco dark) === */
     --sidebar-background: 222 47% 11%;
     --sidebar-foreground: 213 31% 75%;
-    --sidebar-primary: 45 93% 47%;    /* Dorado corporativo */
-    --sidebar-primary-foreground: 222 47% 11%;
+    --sidebar-primary: 340 75% 55%;
+    /* Rosado para modo claro */
+    --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 217 33% 17%;
     --sidebar-accent-foreground: 210 40% 98%;
     --sidebar-border: 217 33% 17%;
-    --sidebar-ring: 45 93% 47%;
+    --sidebar-ring: 340 75% 55%;
 
     --success: 142 71% 45%;
     --success-foreground: 0 0% 100%;
@@ -79,15 +81,16 @@
     --chart-4: 280 60% 58%;
     --chart-5: 340 70% 58%;
 
-    /* SIDEBAR DARK */
+    /* SIDEBAR DARK - blanco para selección */
     --sidebar-background: 222 47% 4%;
     --sidebar-foreground: 213 31% 75%;
-    --sidebar-primary: 45 93% 52%;
+    --sidebar-primary: 0 0% 100%;
+    /* Blanco para modo oscuro */
     --sidebar-primary-foreground: 222 47% 5%;
     --sidebar-accent: 217 33% 10%;
     --sidebar-accent-foreground: 210 40% 98%;
     --sidebar-border: 217 33% 12%;
-    --sidebar-ring: 45 93% 52%;
+    --sidebar-ring: 0 0% 100%;
 
     --success: 142 70% 48%;
     --success-foreground: 0 0% 100%;
@@ -100,6 +103,7 @@
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
   }
@@ -110,44 +114,75 @@
    ============================================ */
 
 /* Staggered children animation - cada hijo aparece con delay */
-.stagger-children > * {
+.stagger-children>* {
   opacity: 0;
   animation: fade-in-up 0.5s ease-out forwards;
 }
-.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
-.stagger-children > *:nth-child(2) { animation-delay: 60ms; }
-.stagger-children > *:nth-child(3) { animation-delay: 120ms; }
-.stagger-children > *:nth-child(4) { animation-delay: 180ms; }
-.stagger-children > *:nth-child(5) { animation-delay: 240ms; }
-.stagger-children > *:nth-child(6) { animation-delay: 300ms; }
-.stagger-children > *:nth-child(7) { animation-delay: 360ms; }
-.stagger-children > *:nth-child(8) { animation-delay: 420ms; }
+
+.stagger-children>*:nth-child(1) {
+  animation-delay: 0ms;
+}
+
+.stagger-children>*:nth-child(2) {
+  animation-delay: 60ms;
+}
+
+.stagger-children>*:nth-child(3) {
+  animation-delay: 120ms;
+}
+
+.stagger-children>*:nth-child(4) {
+  animation-delay: 180ms;
+}
+
+.stagger-children>*:nth-child(5) {
+  animation-delay: 240ms;
+}
+
+.stagger-children>*:nth-child(6) {
+  animation-delay: 300ms;
+}
+
+.stagger-children>*:nth-child(7) {
+  animation-delay: 360ms;
+}
+
+.stagger-children>*:nth-child(8) {
+  animation-delay: 420ms;
+}
 
 @keyframes fade-in-up {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Cards con efecto hover profesional */
 .card-hover {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
+
 .card-hover:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 25px -5px rgb(0 0 0 / 0.08), 0 4px 10px -6px rgb(0 0 0 / 0.05);
 }
+
 .dark .card-hover:hover {
   box-shadow: 0 8px 25px -5px rgb(0 0 0 / 0.3), 0 4px 10px -6px rgb(0 0 0 / 0.2);
 }
 
 /* Shimmer skeleton loading */
 .skeleton-shimmer {
-  background: linear-gradient(
-    90deg,
-    hsl(var(--muted)) 25%,
-    hsl(var(--muted-foreground) / 0.08) 50%,
-    hsl(var(--muted)) 75%
-  );
+  background: linear-gradient(90deg,
+      hsl(var(--muted)) 25%,
+      hsl(var(--muted-foreground) / 0.08) 50%,
+      hsl(var(--muted)) 75%);
   background-size: 200% 100%;
   animation: shimmer 2s linear infinite;
 }
@@ -156,6 +191,7 @@
 .nav-indicator {
   position: relative;
 }
+
 .nav-indicator::before {
   content: '';
   position: absolute;
@@ -169,6 +205,7 @@
   opacity: 0;
   transition: opacity 0.2s ease;
 }
+
 .nav-indicator[data-active="true"]::before {
   opacity: 1;
 }
@@ -177,6 +214,7 @@
 .btn-press {
   transition: transform 0.1s ease;
 }
+
 .btn-press:active {
   transform: scale(0.97);
 }
@@ -185,6 +223,7 @@
 .status-dot-live {
   position: relative;
 }
+
 .status-dot-live::before {
   content: '';
   position: absolute;
@@ -212,6 +251,7 @@
 .table-row-corporate {
   transition: background-color 0.15s ease;
 }
+
 .table-row-corporate:hover {
   background-color: hsl(var(--muted) / 0.5);
 }
@@ -222,16 +262,35 @@
 }
 
 @keyframes count-up {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes shimmer {
-  from { background-position: -200% 0; }
-  to { background-position: 200% 0; }
+  from {
+    background-position: -200% 0;
+  }
+
+  to {
+    background-position: 200% 0;
+  }
 }
 
 @keyframes status-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
 }

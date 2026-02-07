@@ -9,14 +9,16 @@ import {
   PieChart,
   Pie,
   Cell,
-  AreaChart,
-  Area,
+  LineChart,
+  Line,
+  LabelList,
 } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -33,6 +35,7 @@ import {
 } from "@/lib/mock-data"
 import { Users, Clock, FolderKanban, TrendingUp } from "lucide-react"
 import { cn } from "@/lib/utils"
+import React from "react"
 
 const statusColors: Record<string, { bg: string; text: string; label: string }> = {
   trabajando: { bg: "bg-emerald-500/15", text: "text-emerald-600 dark:text-emerald-400", label: "Trabajando" },
@@ -148,7 +151,7 @@ export default function AdminDashboard() {
 
       {/* Charts row */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Hours by Worker */}
+        {/* Hours by Worker - Glowing Bar Chart */}
         <Card className="card-hover">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -159,29 +162,56 @@ export default function AdminDashboard() {
             <ChartContainer
               config={{
                 hours: { label: "Horas", color: CHART_COLORS[0] },
-                target: { label: "Meta", color: "hsl(var(--muted-foreground))" },
               }}
               className="h-[280px]"
             >
-              <BarChart data={hoursByWorker} layout="vertical" margin={{ left: 10, right: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--border))" />
-                <XAxis type="number" tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
-                <YAxis dataKey="worker" type="category" width={90} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Bar dataKey="hours" fill={CHART_COLORS[0]} radius={[0, 4, 4, 0]} barSize={20} />
+              <BarChart
+                accessibilityLayer
+                data={hoursByWorker}
+                layout="vertical"
+                margin={{ left: -15 }}
+              >
+                <YAxis
+                  type="category"
+                  dataKey="worker"
+                  tickLine={false}
+                  tickMargin={10}
+                  axisLine={false}
+                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                  width={90}
+                />
+                <XAxis
+                  type="number"
+                  tickLine={false}
+                  tickMargin={10}
+                  axisLine={false}
+                  hide
+                />
+                <ChartTooltip
+                  cursor={false}
+                  content={<ChartTooltipContent hideLabel />}
+                />
+                <Bar
+                  dataKey="hours"
+                  fill={CHART_COLORS[0]}
+                  radius={4}
+                  barSize={14}
+                  shape={<CustomGlowingBar />}
+                  background={{ fill: "hsl(var(--muted)/0.3)", radius: 4 }}
+                />
               </BarChart>
             </ChartContainer>
           </CardContent>
         </Card>
 
-        {/* Hours by Project (Pie) */}
-        <Card className="card-hover">
-          <CardHeader className="pb-2">
+        {/* Hours by Project (Rounded Pie) */}
+        <Card className="card-hover flex flex-col">
+          <CardHeader className="items-center pb-0">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Distribución de Horas por Proyecto
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex-1 pb-0">
             <ChartContainer
               config={Object.fromEntries(
                 hoursByProject.map((p, i) => [
@@ -189,28 +219,35 @@ export default function AdminDashboard() {
                   { label: p.project, color: CHART_COLORS[i % CHART_COLORS.length] },
                 ])
               )}
-              className="h-[280px]"
+              className="[&_.recharts-text]:fill-background mx-auto aspect-square max-h-[250px]"
             >
               <PieChart>
+                <ChartTooltip
+                  content={<ChartTooltipContent nameKey="project" hideLabel />}
+                />
                 <Pie
                   data={hoursByProject}
                   dataKey="hours"
                   nameKey="project"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={100}
-                  innerRadius={55}
-                  paddingAngle={3}
-                  strokeWidth={0}
+                  innerRadius={30}
+                  cornerRadius={8}
+                  paddingAngle={4}
                 >
                   {hoursByProject.map((_, i) => (
                     <Cell key={`cell-${i}`} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                   ))}
+                  <LabelList
+                    dataKey="hours"
+                    stroke="none"
+                    fontSize={12}
+                    fontWeight={500}
+                    fill="currentColor"
+                    formatter={(value: number) => `${value}h`}
+                  />
                 </Pie>
-                <ChartTooltip content={<ChartTooltipContent />} />
               </PieChart>
             </ChartContainer>
-            <div className="mt-3 flex flex-wrap gap-3 justify-center">
+            <div className="mt-3 flex flex-wrap gap-3 justify-center pb-4">
               {hoursByProject.map((p, i) => (
                 <div key={p.project} className="flex items-center gap-1.5">
                   <div
@@ -227,7 +264,7 @@ export default function AdminDashboard() {
 
       {/* Weekly Trend + Active Workers */}
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Weekly Trend */}
+        {/* Weekly Trend - Pinging Dot Chart */}
         <Card className="lg:col-span-1 card-hover">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -239,22 +276,34 @@ export default function AdminDashboard() {
               config={{
                 hours: { label: "Horas", color: CHART_COLORS[1] },
               }}
-              className="h-[200px]"
+              className="h-[260px]"
             >
-              <AreaChart data={weeklyTrend}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="day" tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
-                <YAxis tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Area
-                  type="monotone"
-                  dataKey="hours"
-                  stroke={CHART_COLORS[1]}
-                  fill={CHART_COLORS[1]}
-                  fillOpacity={0.15}
-                  strokeWidth={2}
+              <LineChart
+                accessibilityLayer
+                data={weeklyTrend}
+                margin={{ left: 12, right: 12, top: 20, bottom: 10 }}
+              >
+                <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
+                <XAxis
+                  dataKey="day"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
                 />
-              </AreaChart>
+                <ChartTooltip
+                  cursor={false}
+                  content={<ChartTooltipContent hideLabel />}
+                />
+                <Line
+                  dataKey="hours"
+                  type="linear"
+                  stroke={CHART_COLORS[1]}
+                  strokeDasharray="4 4"
+                  strokeWidth={2}
+                  dot={<PingingDot />}
+                />
+              </LineChart>
             </ChartContainer>
           </CardContent>
         </Card>
@@ -308,6 +357,12 @@ export default function AdminDashboard() {
                   )
                 })}
               </TableBody>
+              <TableFooter>
+                <TableRow>
+                  <TableCell colSpan={4}>Total Trabajadores Activos</TableCell>
+                  <TableCell className="font-medium">{activeToday.length}</TableCell>
+                </TableRow>
+              </TableFooter>
             </Table>
           </CardContent>
         </Card>
@@ -315,3 +370,75 @@ export default function AdminDashboard() {
     </div>
   )
 }
+
+// Custom glowing bar component for chart
+const CustomGlowingBar = (
+  props: React.SVGProps<SVGRectElement> & {
+    dataKey?: string;
+    glowOpacity?: number;
+  }
+) => {
+  const { fill, x, y, width, height, radius } = props;
+
+  return (
+    <>
+      <rect
+        x={x}
+        y={y}
+        rx={typeof radius === "number" ? radius : 4}
+        width={width}
+        height={height}
+        stroke="none"
+        fill={fill}
+        filter="url(#glow-chart-hours)"
+      />
+      <defs>
+        <filter
+          id="glow-chart-hours"
+          x="-200%"
+          y="-200%"
+          width="600%"
+          height="600%"
+        >
+          <feGaussianBlur stdDeviation="6" result="blur" />
+          <feComposite in="SourceGraphic" in2="blur" operator="over" />
+        </filter>
+      </defs>
+    </>
+  );
+};
+
+// Pinging dot component for line chart
+const PingingDot = (props: React.SVGProps<SVGCircleElement>) => {
+  const { cx, cy, stroke } = props;
+
+  return (
+    <g>
+      {/* Main dot */}
+      <circle cx={cx} cy={cy} r={4} fill={stroke} />
+      {/* Ping animation circles */}
+      <circle
+        cx={cx}
+        cy={cy}
+        r={4}
+        stroke={stroke}
+        fill="none"
+        strokeWidth="1"
+        opacity="0.8"
+      >
+        <animate
+          attributeName="r"
+          values="4;12"
+          dur="1.5s"
+          repeatCount="indefinite"
+        />
+        <animate
+          attributeName="opacity"
+          values="0.8;0"
+          dur="1.5s"
+          repeatCount="indefinite"
+        />
+      </circle>
+    </g>
+  );
+};

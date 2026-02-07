@@ -74,7 +74,7 @@ export default function ClientesPage() {
   const clientToDelete = crud.items.find((c) => c.id === crud.deleteConfirmId)
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 page-enter">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Clientes</h1>
@@ -97,9 +97,9 @@ export default function ClientesPage() {
       </div>
 
       {/* Desktop: Grid of Cards | Mobile: Full width cards */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 stagger-children">
         {crud.filteredItems.map((client) => (
-          <Card key={client.id}>
+          <Card key={client.id} className="card-hover">
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
