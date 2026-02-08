@@ -2,9 +2,9 @@
 
 import { useState } from "react"
 import { mockProjects, mockClients, mockUsers } from "@/lib/mock-data"
-import type { Project, ProjectStatus, Task } from "@/lib/types"
+import type { Project, ProjectStatus } from "@/lib/types"
 import { useCrud } from "@/hooks/use-crud"
-import { projectSchema, taskSchema, formatZodErrors } from "@/lib/schemas"
+import { projectSchema, formatZodErrors } from "@/lib/schemas"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/dialog"
 import { DeleteConfirmation } from "@/components/delete-confirmation"
 import { Progress } from "@/components/ui/progress"
-import { Plus, Pencil, Trash2, Search, Calendar, Users, ListTodo, X } from "lucide-react"
+import { Plus, Pencil, Trash2, Search, Calendar, Users, ListTodo } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
@@ -50,10 +50,6 @@ export default function ProyectosPage() {
     assignedWorkers: [] as string[],
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [newTaskName, setNewTaskName] = useState("")
-  const [newTaskDesc, setNewTaskDesc] = useState("")
-  const [taskError, setTaskError] = useState("")
 
   const workers = mockUsers.filter((u) => u.role === "trabajador" && u.active)
 
@@ -76,7 +72,6 @@ export default function ProyectosPage() {
       assignedWorkers: [],
     })
     setErrors({})
-    setTasks([])
     crud.openCreate()
   }
 
@@ -91,7 +86,6 @@ export default function ProyectosPage() {
       assignedWorkers: project.assignedWorkers,
     })
     setErrors({})
-    setTasks([...project.tasks])
     crud.openEdit(project)
   }
 
@@ -104,13 +98,14 @@ export default function ProyectosPage() {
     }
 
     if (crud.editing) {
-      crud.update(crud.editing.id, { ...form, tasks })
+      // Preserve existing tasks when updating - workers create tasks, not admin
+      crud.update(crud.editing.id, { ...form, tasks: crud.editing.tasks })
       toast.success("Proyecto actualizado")
     } else {
       const newProject: Project = {
         id: `p${Date.now()}`,
         ...form,
-        tasks,
+        tasks: [],  // New projects start with no tasks - workers will add them
       }
       crud.add(newProject)
       toast.success("Proyecto creado")
@@ -132,28 +127,6 @@ export default function ProyectosPage() {
         ? prev.assignedWorkers.filter((w) => w !== workerId)
         : [...prev.assignedWorkers, workerId],
     }))
-  }
-
-  function addTask() {
-    const result = taskSchema.safeParse({ name: newTaskName, description: newTaskDesc })
-    if (!result.success) {
-      setTaskError(result.error.issues[0]?.message ?? "Error")
-      return
-    }
-    const newTask: Task = {
-      id: `t${Date.now()}`,
-      name: newTaskName,
-      description: newTaskDesc,
-      projectId: crud.editing?.id ?? "",
-    }
-    setTasks((prev) => [...prev, newTask])
-    setNewTaskName("")
-    setNewTaskDesc("")
-    setTaskError("")
-  }
-
-  function removeTask(taskId: string) {
-    setTasks((prev) => prev.filter((t) => t.id !== taskId))
   }
 
   function getProjectProgress(project: Project) {
@@ -401,52 +374,12 @@ export default function ProyectosPage() {
               {errors.assignedWorkers && <p className="text-xs text-destructive">{errors.assignedWorkers}</p>}
             </div>
 
-            {/* Inline Task Management */}
-            <div className="flex flex-col gap-2">
-              <Label className="flex items-center gap-2">
-                <ListTodo className="h-4 w-4" />
-                Tareas del Proyecto
-              </Label>
-              <div className="rounded-lg border border-border p-3">
-                {tasks.length > 0 && (
-                  <div className="flex flex-col gap-2 mb-3">
-                    {tasks.map((task) => (
-                      <div key={task.id} className="flex items-center justify-between rounded-md bg-muted px-3 py-2">
-                        <div>
-                          <p className="text-sm font-medium text-foreground">{task.name}</p>
-                          <p className="text-xs text-muted-foreground">{task.description}</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => removeTask(task.id)}
-                          className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className="flex flex-col gap-2">
-                  <Input
-                    placeholder="Nombre de la tarea"
-                    value={newTaskName}
-                    onChange={(e) => setNewTaskName(e.target.value)}
-                    className="text-sm"
-                  />
-                  <Input
-                    placeholder="Descripción breve"
-                    value={newTaskDesc}
-                    onChange={(e) => setNewTaskDesc(e.target.value)}
-                    className="text-sm"
-                  />
-                  {taskError && <p className="text-xs text-destructive">{taskError}</p>}
-                  <Button type="button" variant="outline" size="sm" onClick={addTask} className="self-start gap-1">
-                    <Plus className="h-3 w-3" />
-                    Agregar Tarea
-                  </Button>
-                </div>
-              </div>
+            {/* Note about task creation */}
+            <div className="rounded-lg border border-border bg-muted/50 p-3">
+              <p className="text-sm text-muted-foreground">
+                <ListTodo className="inline-block h-4 w-4 mr-1.5 -mt-0.5" />
+                Las tareas son creadas por los trabajadores asignados al proyecto.
+              </p>
             </div>
           </div>
           <DialogFooter>

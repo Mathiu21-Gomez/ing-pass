@@ -28,6 +28,7 @@ export interface Task {
   name: string
   description: string
   projectId: string
+  createdBy: string  // ID of the worker who created this task
 }
 
 export interface Project {
