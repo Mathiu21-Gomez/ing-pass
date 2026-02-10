@@ -63,6 +63,9 @@ export const userSchema = z.object({
         .min(2, "El cargo debe tener al menos 2 caracteres")
         .max(50, "El cargo no puede exceder 50 caracteres"),
     active: z.boolean().default(true),
+    scheduleType: z.enum(["fijo", "libre"]).default("fijo"),
+    scheduleStart: z.string().regex(/^\d{2}:\d{2}$/, "Formato HH:MM requerido"),
+    scheduleEnd: z.string().regex(/^\d{2}:\d{2}$/, "Formato HH:MM requerido"),
 })
 
 export type UserFormData = z.infer<typeof userSchema>

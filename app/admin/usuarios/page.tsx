@@ -23,7 +23,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { Plus, Pencil, Search } from "lucide-react"
+import { Plus, Pencil, Search, Clock } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import {
@@ -40,11 +40,11 @@ export default function UsuariosPage() {
   const crud = useCrud<User>(mockUsers, {
     searchFields: ["name", "email", "position"],
   })
-  const [form, setForm] = useState({ name: "", email: "", role: "trabajador" as UserRole, position: "", active: true })
+  const [form, setForm] = useState({ name: "", email: "", role: "trabajador" as UserRole, position: "", active: true, scheduleType: "fijo" as "fijo" | "libre", scheduleStart: "08:00", scheduleEnd: "17:00" })
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   function openNew() {
-    setForm({ name: "", email: "", role: "trabajador", position: "", active: true })
+    setForm({ name: "", email: "", role: "trabajador", position: "", active: true, scheduleType: "fijo", scheduleStart: "08:00", scheduleEnd: "17:00" })
     setErrors({})
     crud.openCreate()
   }
@@ -56,6 +56,9 @@ export default function UsuariosPage() {
       role: user.role,
       position: user.position,
       active: user.active,
+      scheduleType: user.scheduleType,
+      scheduleStart: user.scheduleStart,
+      scheduleEnd: user.scheduleEnd,
     })
     setErrors({})
     crud.openEdit(user)
@@ -222,6 +225,12 @@ export default function UsuariosPage() {
                   aria-label={user.active ? "Desactivar" : "Activar"}
                 />
               </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Horario</span>
+                <span className="text-xs text-foreground font-mono">
+                  {user.scheduleType === "libre" ? "Libre (24h)" : `${user.scheduleStart} - ${user.scheduleEnd}`}
+                </span>
+              </div>
             </div>
           </div>
         ))}
@@ -279,6 +288,59 @@ export default function UsuariosPage() {
             <div className="flex items-center justify-between rounded-lg border border-border p-3">
               <Label className="text-sm">Usuario activo</Label>
               <Switch checked={form.active} onCheckedChange={(v) => setForm({ ...form, active: v })} />
+            </div>
+
+            {/* Schedule section */}
+            <div className="rounded-lg border border-border p-3 flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                <Label className="text-sm font-medium">Horario Laboral</Label>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Tipo de horario</span>
+                <Select value={form.scheduleType} onValueChange={(v: "fijo" | "libre") => {
+                  if (v === "libre") {
+                    setForm({ ...form, scheduleType: v, scheduleStart: "00:00", scheduleEnd: "23:59" })
+                  } else {
+                    setForm({ ...form, scheduleType: v, scheduleStart: "08:00", scheduleEnd: "17:00" })
+                  }
+                }}>
+                  <SelectTrigger className="w-32 h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="fijo">Fijo</SelectItem>
+                    <SelectItem value="libre">Libre (24h)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {form.scheduleType === "fijo" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-xs text-muted-foreground">Entrada</Label>
+                    <Input
+                      type="time"
+                      value={form.scheduleStart}
+                      onChange={(e) => setForm({ ...form, scheduleStart: e.target.value })}
+                      className="h-8 text-sm font-mono"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-xs text-muted-foreground">Salida</Label>
+                    <Input
+                      type="time"
+                      value={form.scheduleEnd}
+                      onChange={(e) => setForm({ ...form, scheduleEnd: e.target.value })}
+                      className="h-8 text-sm font-mono"
+                    />
+                  </div>
+                </div>
+              )}
+              {form.scheduleType === "libre" && (
+                <p className="text-xs text-muted-foreground bg-muted/50 rounded px-2 py-1.5">
+                  El trabajador puede registrar jornada en cualquier horario (contrato por obra).
+                </p>
+              )}
             </div>
           </div>
           <DialogFooter>

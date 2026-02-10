@@ -43,6 +43,9 @@ export const mockUsers: User[] = [
     role: "admin",
     position: "Gerente de Operaciones",
     active: true,
+    scheduleStart: "08:00",
+    scheduleEnd: "17:00",
+    scheduleType: "fijo",
   },
   {
     id: "u2",
@@ -51,6 +54,9 @@ export const mockUsers: User[] = [
     role: "trabajador",
     position: "Ingeniero Civil",
     active: true,
+    scheduleStart: "08:00",
+    scheduleEnd: "17:00",
+    scheduleType: "fijo",
   },
   {
     id: "u3",
@@ -59,6 +65,9 @@ export const mockUsers: User[] = [
     role: "trabajador",
     position: "Arquitecta",
     active: true,
+    scheduleStart: "09:00",
+    scheduleEnd: "18:00",
+    scheduleType: "fijo",
   },
   {
     id: "u4",
@@ -67,6 +76,9 @@ export const mockUsers: User[] = [
     role: "trabajador",
     position: "Técnico Eléctrico",
     active: true,
+    scheduleStart: "10:00",
+    scheduleEnd: "19:00",
+    scheduleType: "fijo",
   },
   {
     id: "u5",
@@ -75,6 +87,9 @@ export const mockUsers: User[] = [
     role: "trabajador",
     position: "Diseñadora Industrial",
     active: false,
+    scheduleStart: "00:00",
+    scheduleEnd: "23:59",
+    scheduleType: "libre",
   },
   {
     id: "u6",
@@ -83,6 +98,9 @@ export const mockUsers: User[] = [
     role: "trabajador",
     position: "Desarrollador Senior",
     active: true,
+    scheduleStart: "09:00",
+    scheduleEnd: "18:00",
+    scheduleType: "fijo",
   },
 ]
 

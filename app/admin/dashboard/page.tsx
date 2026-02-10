@@ -281,7 +281,7 @@ export default function AdminDashboard() {
               <LineChart
                 accessibilityLayer
                 data={weeklyTrend}
-                margin={{ left: 12, right: 12, top: 20, bottom: 10 }}
+                margin={{ left: 12, right: 12, top: 30, bottom: 10 }}
               >
                 <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
                 <XAxis
@@ -290,6 +290,10 @@ export default function AdminDashboard() {
                   axisLine={false}
                   tickMargin={8}
                   tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                />
+                <YAxis
+                  hide
+                  domain={['dataMin - 5', 'dataMax + 5']}
                 />
                 <ChartTooltip
                   cursor={false}

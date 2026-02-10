@@ -21,6 +21,9 @@ export interface User {
   position: string
   active: boolean
   avatar?: string
+  scheduleStart: string  // e.g. "08:00"
+  scheduleEnd: string    // e.g. "17:00"
+  scheduleType: "fijo" | "libre"  // fijo = fixed, libre = 24h free schedule
 }
 
 export interface Task {

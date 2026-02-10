@@ -18,37 +18,36 @@ export function TimerDisplay() {
   } = useTimer()
 
   const progress = Math.min((elapsedWorkSeconds / EIGHT_HOURS) * 100, 100)
-  const circumference = 2 * Math.PI * 120
   const currentHour = Math.floor(elapsedWorkSeconds / ONE_HOUR)
 
-  const statusConfig: Record<string, { color: string; ring: string; bg: string; label: string }> = {
+  const statusConfig: Record<string, { color: string; barColor: string; bg: string; label: string }> = {
     trabajando: {
       color: "text-emerald-500",
-      ring: "stroke-emerald-500",
+      barColor: "bg-emerald-500",
       bg: "bg-emerald-500/5",
       label: "Trabajando",
     },
     colacion: {
       color: "text-amber-500",
-      ring: "stroke-amber-500",
+      barColor: "bg-amber-500",
       bg: "bg-amber-500/5",
       label: "En Colación",
     },
     pausado: {
       color: "text-orange-500",
-      ring: "stroke-orange-500",
+      barColor: "bg-orange-500",
       bg: "bg-orange-500/5",
       label: "Pausado",
     },
     finalizado: {
       color: "text-muted-foreground",
-      ring: "stroke-muted-foreground",
+      barColor: "bg-muted-foreground",
       bg: "bg-muted",
       label: "Jornada Finalizada",
     },
     inactivo: {
       color: "text-muted-foreground",
-      ring: "stroke-muted",
+      barColor: "bg-muted",
       bg: "bg-muted/50",
       label: "Sin iniciar",
     },
@@ -66,6 +65,11 @@ export function TimerDisplay() {
   // Generate hour markers (1-8)
   const hourMarkers = Array.from({ length: 8 }, (_, i) => i + 1)
 
+  // Generate timeline blocks for visual representation
+  const totalMinutesWorked = Math.floor(elapsedWorkSeconds / 60)
+  const totalMinutesLunch = Math.floor(elapsedLunchSeconds / 60)
+  const totalMinutesPause = Math.floor(elapsedPauseSeconds / 60)
+
   return (
     <div
       className={cn(
@@ -74,56 +78,122 @@ export function TimerDisplay() {
         status === "trabajando" && "ring-2 ring-emerald-500/20"
       )}
     >
-      {/* Circular timer */}
-      <div className={cn("relative", status === "trabajando" && "animate-ring-pulse")}>
-        <svg width="280" height="280" className="-rotate-90" aria-hidden="true">
-          <circle
-            cx="140"
-            cy="140"
-            r="120"
-            fill="none"
-            strokeWidth="8"
-            className="stroke-border"
-          />
-          <circle
-            cx="140"
-            cy="140"
-            r="120"
-            fill="none"
-            strokeWidth="8"
-            strokeLinecap="round"
-            className={cn(
-              config.ring,
-              "transition-all duration-1000",
-              status === "trabajando" && "timer-glow-active"
-            )}
-            strokeDasharray={circumference}
-            strokeDashoffset={circumference - (progress / 100) * circumference}
-          />
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span
-            className={cn(
-              "font-mono text-5xl font-bold tracking-tight",
-              config.color,
-              status === "trabajando" && "animate-pulse-soft"
-            )}
-          >
-            {displayTime}
-          </span>
-          <span className={cn("mt-1 text-sm font-medium", config.color)}>
+      {/* Time display - large and centered */}
+      <div className="flex flex-col items-center gap-2">
+        <span
+          className={cn(
+            "font-mono text-5xl font-bold tracking-tight",
+            config.color,
+            status === "trabajando" && "animate-pulse-soft"
+          )}
+        >
+          {displayTime}
+        </span>
+        <div className="flex items-center gap-2">
+          <span className={cn("text-sm font-medium", config.color)}>
             {config.label}
           </span>
-          <span className="mt-1 text-xs text-muted-foreground">
-            {Math.round(progress)}% de la jornada
-          </span>
-          {status === "colacion" && (
-            <span className="mt-1 text-xs text-muted-foreground">
-              Trabajo: {formatTime(elapsedWorkSeconds)}
+          {status === "trabajando" && (
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
             </span>
           )}
         </div>
+        {status === "colacion" && (
+          <span className="text-xs text-muted-foreground">
+            Trabajo: {formatTime(elapsedWorkSeconds)}
+          </span>
+        )}
       </div>
+
+      {/* Main progress bar */}
+      <div className="w-full max-w-md">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-muted-foreground">0h</span>
+          <span className="text-xs font-semibold text-foreground">
+            {Math.round(progress)}% de la jornada
+          </span>
+          <span className="text-xs text-muted-foreground">8h</span>
+        </div>
+        <div className="relative h-4 bg-muted rounded-full overflow-hidden">
+          <div
+            className={cn(
+              "absolute inset-y-0 left-0 rounded-full transition-all duration-1000",
+              config.barColor,
+              status === "trabajando" && "timer-glow-active"
+            )}
+            style={{ width: `${progress}%` }}
+          />
+          {/* Hour tick marks */}
+          {[1, 2, 3, 4, 5, 6, 7].map((h) => (
+            <div
+              key={h}
+              className="absolute top-0 bottom-0 w-px bg-background/30"
+              style={{ left: `${(h / 8) * 100}%` }}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Timeline blocks - visual day representation */}
+      {status !== "inactivo" && (
+        <div className="w-full max-w-md">
+          <div className="flex gap-1 h-6 rounded-md overflow-hidden">
+            {totalMinutesWorked > 0 && (
+              <div
+                className="bg-emerald-500/80 rounded-sm flex items-center justify-center"
+                style={{ flex: totalMinutesWorked }}
+              >
+                <span className="text-[9px] font-medium text-white truncate px-1">
+                  {totalMinutesWorked >= 30 ? "TRABAJO" : ""}
+                </span>
+              </div>
+            )}
+            {totalMinutesLunch > 0 && (
+              <div
+                className="bg-amber-500/80 rounded-sm flex items-center justify-center"
+                style={{ flex: totalMinutesLunch }}
+              >
+                <span className="text-[9px] font-medium text-white truncate px-1">
+                  {totalMinutesLunch >= 10 ? "COLACIÓN" : ""}
+                </span>
+              </div>
+            )}
+            {totalMinutesPause > 0 && (
+              <div
+                className="bg-orange-400/80 rounded-sm flex items-center justify-center"
+                style={{ flex: totalMinutesPause }}
+              >
+                <span className="text-[9px] font-medium text-white truncate px-1">
+                  {totalMinutesPause >= 10 ? "PAUSA" : ""}
+                </span>
+              </div>
+            )}
+            {/* Remaining time */}
+            {(totalMinutesWorked + totalMinutesLunch + totalMinutesPause) < 480 && (
+              <div
+                className="bg-muted/60 rounded-sm"
+                style={{ flex: 480 - totalMinutesWorked - totalMinutesLunch - totalMinutesPause }}
+              />
+            )}
+          </div>
+          <div className="flex items-center gap-4 mt-2 justify-center">
+            <div className="flex items-center gap-1">
+              <div className="h-2.5 w-2.5 rounded-sm bg-emerald-500/80" />
+              <span className="text-[10px] text-muted-foreground">Trabajo</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="h-2.5 w-2.5 rounded-sm bg-amber-500/80" />
+              <span className="text-[10px] text-muted-foreground">Colación</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="h-2.5 w-2.5 rounded-sm bg-orange-400/80" />
+              <span className="text-[10px] text-muted-foreground">Pausa</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-6 w-full max-w-sm">

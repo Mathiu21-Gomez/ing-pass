@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Play, Pause, Square, UtensilsCrossed, Coffee, TrendingUp, Save, ArrowRightLeft } from "lucide-react"
+import { toast } from "sonner"
 
 export default function MiJornadaPage() {
   const { user } = useAuth()
@@ -33,6 +34,9 @@ export default function MiJornadaPage() {
   const [selectedTask, setSelectedTask] = useState("")
   const [progressValue, setProgressValue] = useState(0)
   const [progressNote, setProgressNote] = useState("")
+  const [showSwitchPanel, setShowSwitchPanel] = useState(false)
+  const [switchProject, setSwitchProject] = useState("")
+  const [switchTask, setSwitchTask] = useState("")
 
   const assignedProjects = mockProjects.filter(
     (p) => p.assignedWorkers.includes(user?.id ?? "") && p.status === "Activo"
@@ -40,6 +44,9 @@ export default function MiJornadaPage() {
 
   const currentProject = assignedProjects.find((p) => p.id === selectedProject)
   const tasks = currentProject?.tasks ?? []
+
+  const switchProjectObj = assignedProjects.find((p) => p.id === switchProject)
+  const switchTasks = switchProjectObj?.tasks ?? []
 
   // Week entries for this worker
   const weekEntries = mockTimeEntries
@@ -166,14 +173,69 @@ export default function MiJornadaPage() {
                         Finalizar
                       </Button>
                     </div>
-                    <Button
-                      onClick={timer.openSwitchTaskDialog}
-                      variant="ghost"
-                      className="gap-2 text-muted-foreground hover:text-foreground"
-                    >
-                      <ArrowRightLeft className="h-4 w-4" />
-                      Cambiar Proyecto/Tarea
-                    </Button>
+                    {!showSwitchPanel ? (
+                      <Button
+                        onClick={() => {
+                          setSwitchProject(timer.currentProjectId ?? "")
+                          setSwitchTask(timer.currentTaskId ?? "")
+                          setShowSwitchPanel(true)
+                        }}
+                        variant="ghost"
+                        className="gap-2 text-muted-foreground hover:text-foreground"
+                      >
+                        <ArrowRightLeft className="h-4 w-4" />
+                        Cambiar Proyecto/Tarea
+                      </Button>
+                    ) : (
+                      <div className="rounded-lg border border-border bg-muted/30 p-3 flex flex-col gap-3 animate-fade-in-up">
+                        <p className="text-xs font-medium text-muted-foreground">Cambiar a:</p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <Select value={switchProject} onValueChange={(v) => { setSwitchProject(v); setSwitchTask("") }}>
+                            <SelectTrigger className="h-9 text-xs">
+                              <SelectValue placeholder="Proyecto" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {assignedProjects.map((p) => (
+                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Select value={switchTask} onValueChange={setSwitchTask} disabled={!switchProject}>
+                            <SelectTrigger className="h-9 text-xs">
+                              <SelectValue placeholder="Tarea" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {switchTasks.map((t) => (
+                                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex-1 h-8 text-xs"
+                            onClick={() => setShowSwitchPanel(false)}
+                          >
+                            Cancelar
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="flex-1 h-8 text-xs gap-1 bg-primary text-primary-foreground"
+                            disabled={!switchProject || !switchTask}
+                            onClick={() => {
+                              timer.switchTask(switchProject, switchTask)
+                              setShowSwitchPanel(false)
+                              toast.success("Proyecto/Tarea cambiado")
+                            }}
+                          >
+                            <ArrowRightLeft className="h-3 w-3" />
+                            Confirmar Cambio
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

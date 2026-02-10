@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useAuth } from "@/lib/contexts/auth-context"
-import { mockProjects, mockClients } from "@/lib/mock-data"
+import { mockProjects, mockClients, mockUsers } from "@/lib/mock-data"
 import type { Task } from "@/lib/types"
 import { taskSchema, formatZodErrors } from "@/lib/schemas"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -18,7 +18,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { Calendar, CheckCircle2, Clock, ListChecks, Plus, User } from "lucide-react"
+import { Calendar, CheckCircle2, Clock, ListChecks, Plus, User, FileText } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import type { ProjectStatus } from "@/lib/types"
@@ -35,6 +35,8 @@ export default function MisProyectosPage() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [taskForm, setTaskForm] = useState({ name: "", description: "" })
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [detailTask, setDetailTask] = useState<Task | null>(null)
+  const [detailProjectId, setDetailProjectId] = useState<string | null>(null)
 
   // In real app, this would be managed by a global state or API
   const [localProjects, setLocalProjects] = useState(mockProjects)
@@ -170,7 +172,11 @@ export default function MisProyectosPage() {
                     ) : (
                       <div className="flex flex-col gap-1.5">
                         {project.tasks.map((task) => (
-                          <div key={task.id} className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
+                          <div
+                            key={task.id}
+                            className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 cursor-pointer hover:bg-muted/60 transition-colors"
+                            onClick={() => { setDetailTask(task); setDetailProjectId(project.id) }}
+                          >
                             <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium text-foreground truncate">{task.name}</p>
@@ -224,6 +230,48 @@ export default function MisProyectosPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
             <Button onClick={handleAddTask}>Crear Tarea</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Dialog for task detail */}
+      <Dialog open={!!detailTask} onOpenChange={(open) => !open && setDetailTask(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-primary" />
+              {detailTask?.name}
+            </DialogTitle>
+            <p className="text-xs text-muted-foreground">Detalles de la tarea</p>
+          </DialogHeader>
+          {detailTask && (
+            <div className="flex flex-col gap-4 py-2">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Descripción</p>
+                <p className="text-sm text-foreground">{detailTask.description}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Proyecto</p>
+                  <p className="text-sm text-foreground">
+                    {localProjects.find(p => p.id === detailProjectId)?.name}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Creada por</p>
+                  <p className="text-sm text-foreground">
+                    {mockUsers.find(u => u.id === detailTask.createdBy)?.name ?? "Desconocido"}
+                  </p>
+                </div>
+              </div>
+              {detailTask.createdBy === user?.id && (
+                <div className="rounded-md bg-primary/5 border border-primary/10 px-3 py-2">
+                  <p className="text-xs text-primary">✓ Creada por ti</p>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDetailTask(null)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
