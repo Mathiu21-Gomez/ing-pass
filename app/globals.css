@@ -38,16 +38,16 @@
     --chart-5: 340 75% 55%;
     --radius: 0.5rem;
 
-    /* === SIDEBAR CORPORATIVO (navy + rosado light / blanco dark) === */
-    --sidebar-background: 222 47% 11%;
-    --sidebar-foreground: 213 31% 75%;
-    --sidebar-primary: 340 75% 55%;
-    /* Rosado para modo claro */
+    /* === SIDEBAR CORPORATIVO BLANCO === */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 222 47% 25%;
+    --sidebar-primary: 200 80% 45%;
+    /* Azul-verde BIMakers */
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 217 33% 17%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 217 33% 17%;
-    --sidebar-ring: 340 75% 55%;
+    --sidebar-accent: 210 30% 96%;
+    --sidebar-accent-foreground: 222 47% 15%;
+    --sidebar-border: 214 32% 91%;
+    --sidebar-ring: 200 80% 45%;
 
     --success: 142 71% 45%;
     --success-foreground: 0 0% 100%;

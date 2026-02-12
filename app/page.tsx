@@ -51,11 +51,12 @@ export default function LoginPage() {
         <div className="mb-8 flex flex-col items-center gap-3 animate-fade-in-up">
           <div className="animate-float">
             <Image
-              src="/logo.svg"
-              alt="Ingeniera PASS"
+              src="/Logo BIMakers con Texto Gris.png"
+              alt="BIMakers"
               width={200}
-              height={87}
+              height={67}
               priority
+              className="object-contain"
             />
           </div>
           <div className="text-center">

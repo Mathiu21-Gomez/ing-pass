@@ -54,11 +54,11 @@ function SidebarContent({ onItemClick }: { onItemClick?: () => void }) {
         <div className="absolute inset-0 bg-gradient-to-b from-sidebar-primary/5 to-transparent" />
         <div className="relative flex items-center gap-3">
           <Image
-            src="/logo.svg"
-            alt="Ingeniera PASS"
-            width={140}
-            height={60}
-            className="invert dark:invert-0"
+            src="/Logo BIMakers con Texto Gris.png"
+            alt="BIMakers"
+            width={150}
+            height={50}
+            className="object-contain"
           />
         </div>
       </div>

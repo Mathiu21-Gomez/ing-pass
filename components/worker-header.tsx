@@ -49,11 +49,11 @@ export function WorkerHeader() {
         <div className="flex items-center gap-6">
           <Link href="/trabajador/mi-jornada" className="flex items-center gap-2.5">
             <Image
-              src="/logo.svg"
-              alt="Ingeniera PASS"
+              src="/Logo BIMakers con Texto Gris.png"
+              alt="BIMakers"
               width={120}
-              height={52}
-              className="dark:invert-0"
+              height={40}
+              className="object-contain"
             />
           </Link>
 
