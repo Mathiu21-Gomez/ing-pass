@@ -40,11 +40,11 @@ export default function UsuariosPage() {
   const crud = useCrud<User>(mockUsers, {
     searchFields: ["name", "email", "position"],
   })
-  const [form, setForm] = useState({ name: "", email: "", role: "trabajador" as UserRole, position: "", active: true, scheduleType: "fijo" as "fijo" | "libre", scheduleStart: "08:00", scheduleEnd: "17:00" })
+  const [form, setForm] = useState({ name: "", email: "", emailPersonal: "", role: "trabajador" as UserRole, position: "", active: true, scheduleType: "fijo" as "fijo" | "libre", scheduleStart: "08:00", scheduleEnd: "17:00" })
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   function openNew() {
-    setForm({ name: "", email: "", role: "trabajador", position: "", active: true, scheduleType: "fijo", scheduleStart: "08:00", scheduleEnd: "17:00" })
+    setForm({ name: "", email: "", emailPersonal: "", role: "trabajador", position: "", active: true, scheduleType: "fijo", scheduleStart: "08:00", scheduleEnd: "17:00" })
     setErrors({})
     crud.openCreate()
   }
@@ -53,6 +53,7 @@ export default function UsuariosPage() {
     setForm({
       name: user.name,
       email: user.email,
+      emailPersonal: user.emailPersonal,
       role: user.role,
       position: user.position,
       active: user.active,
@@ -144,11 +145,12 @@ export default function UsuariosPage() {
                 <TableCell>
                   <span className={cn(
                     "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
-                    user.role === "admin"
-                      ? "bg-primary/10 text-primary"
-                      : "bg-muted text-muted-foreground"
+                    user.role === "admin" ? "bg-primary/10 text-primary" :
+                      user.role === "coordinador" ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" :
+                        user.role === "externo" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400" :
+                          "bg-muted text-muted-foreground"
                   )}>
-                    {user.role === "admin" ? "Administrador" : "Trabajador"}
+                    {user.role === "admin" ? "Admin" : user.role === "coordinador" ? "Coordinador" : user.role === "externo" ? "Externo" : "Trabajador"}
                   </span>
                 </TableCell>
                 <TableCell>
@@ -212,9 +214,12 @@ export default function UsuariosPage() {
                 <span className="text-muted-foreground">Rol</span>
                 <span className={cn(
                   "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
-                  user.role === "admin" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
+                  user.role === "admin" ? "bg-primary/10 text-primary" :
+                    user.role === "coordinador" ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" :
+                      user.role === "externo" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400" :
+                        "bg-muted text-muted-foreground"
                 )}>
-                  {user.role === "admin" ? "Admin" : "Trabajador"}
+                  {user.role === "admin" ? "Admin" : user.role === "coordinador" ? "Coordinador" : user.role === "externo" ? "Externo" : "Trabajador"}
                 </span>
               </div>
               <div className="flex justify-between items-center">
@@ -261,6 +266,17 @@ export default function UsuariosPage() {
               />
               {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
             </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Email personal</Label>
+              <Input
+                type="email"
+                value={form.emailPersonal}
+                onChange={(e) => setForm({ ...form, emailPersonal: e.target.value })}
+                placeholder="correo.personal@gmail.com"
+                className={errors.emailPersonal ? "border-destructive" : ""}
+              />
+              {errors.emailPersonal && <p className="text-xs text-destructive">{errors.emailPersonal}</p>}
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
                 <Label>Cargo *</Label>
@@ -279,7 +295,9 @@ export default function UsuariosPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="admin">Administrador</SelectItem>
+                    <SelectItem value="coordinador">Coordinador</SelectItem>
                     <SelectItem value="trabajador">Trabajador</SelectItem>
+                    <SelectItem value="externo">Externo (Cliente)</SelectItem>
                   </SelectContent>
                 </Select>
                 {errors.role && <p className="text-xs text-destructive">{errors.role}</p>}

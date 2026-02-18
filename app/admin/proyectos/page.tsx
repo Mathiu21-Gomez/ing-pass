@@ -44,6 +44,8 @@ export default function ProyectosPage() {
     name: "",
     description: "",
     clientId: "",
+    coordinatorId: "",
+    stage: "Planificación",
     startDate: "",
     endDate: "",
     status: "Activo" as ProjectStatus,
@@ -52,6 +54,7 @@ export default function ProyectosPage() {
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   const workers = mockUsers.filter((u) => u.role === "trabajador" && u.active)
+  const coordinators = mockUsers.filter((u) => u.role === "coordinador" && u.active)
 
   const filtered = crud.filteredItems.filter((p) => {
     const matchesSearch =
@@ -66,6 +69,8 @@ export default function ProyectosPage() {
       name: "",
       description: "",
       clientId: "",
+      coordinatorId: "",
+      stage: "Planificación",
       startDate: "",
       endDate: "",
       status: "Activo",
@@ -80,6 +85,8 @@ export default function ProyectosPage() {
       name: project.name,
       description: project.description,
       clientId: project.clientId,
+      coordinatorId: project.coordinatorId,
+      stage: project.stage,
       startDate: project.startDate,
       endDate: project.endDate,
       status: project.status,
@@ -98,14 +105,15 @@ export default function ProyectosPage() {
     }
 
     if (crud.editing) {
-      // Preserve existing tasks when updating - workers create tasks, not admin
-      crud.update(crud.editing.id, { ...form, tasks: crud.editing.tasks })
+      crud.update(crud.editing.id, { ...form, tasks: crud.editing.tasks, documents: crud.editing.documents, urls: crud.editing.urls })
       toast.success("Proyecto actualizado")
     } else {
       const newProject: Project = {
         id: `p${Date.now()}`,
         ...form,
-        tasks: [],  // New projects start with no tasks - workers will add them
+        tasks: [],
+        documents: [],
+        urls: [],
       }
       crud.add(newProject)
       toast.success("Proyecto creado")
@@ -309,6 +317,37 @@ export default function ProyectosPage() {
                 </SelectContent>
               </Select>
               {errors.clientId && <p className="text-xs text-destructive">{errors.clientId}</p>}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label>Coordinador *</Label>
+                <Select value={form.coordinatorId} onValueChange={(v) => setForm({ ...form, coordinatorId: v })}>
+                  <SelectTrigger className={errors.coordinatorId ? "border-destructive" : ""}>
+                    <SelectValue placeholder="Seleccionar coordinador" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {coordinators.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {errors.coordinatorId && <p className="text-xs text-destructive">{errors.coordinatorId}</p>}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Etapa *</Label>
+                <Select value={form.stage} onValueChange={(v) => setForm({ ...form, stage: v })}>
+                  <SelectTrigger className={errors.stage ? "border-destructive" : ""}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Planificación">Planificación</SelectItem>
+                    <SelectItem value="Diseño">Diseño</SelectItem>
+                    <SelectItem value="Construcción">Construcción</SelectItem>
+                    <SelectItem value="Cierre">Cierre</SelectItem>
+                  </SelectContent>
+                </Select>
+                {errors.stage && <p className="text-xs text-destructive">{errors.stage}</p>}
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">

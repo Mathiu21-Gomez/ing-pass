@@ -29,11 +29,12 @@ import {
   getHoursByProject,
   getHoursByWorker,
   getActiveWorkersToday,
+  getKPIData,
   mockUsers,
   mockProjects,
   mockTimeEntries,
 } from "@/lib/mock-data"
-import { Users, Clock, FolderKanban, TrendingUp } from "lucide-react"
+import { Users, Clock, FolderKanban, TrendingUp, ListChecks, CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import React from "react"
 
@@ -57,6 +58,7 @@ export default function AdminDashboard() {
   const hoursByProject = getHoursByProject()
   const hoursByWorker = getHoursByWorker()
   const activeToday = getActiveWorkersToday()
+  const kpi = getKPIData()
 
   const activeWorkers = mockUsers.filter((u) => u.role === "trabajador" && u.active).length
   const activeProjects = mockProjects.filter((p) => p.status === "Activo").length
@@ -368,6 +370,73 @@ export default function AdminDashboard() {
                 </TableRow>
               </TableFooter>
             </Table>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ── KPIs Section ─── */}
+      <div className="grid gap-4 md:grid-cols-2">
+        {/* Task Completion by Project */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <ListChecks className="h-4 w-4 text-primary" />
+              Cumplimiento de Tareas por Proyecto
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-3">
+              {kpi.tasksByProject.map((p) => (
+                <div key={p.projectId}>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-medium text-foreground truncate">{p.projectName}</p>
+                    <span className="text-xs text-muted-foreground">{p.closedTasks}/{p.totalTasks}</span>
+                  </div>
+                  <div className="h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={cn("h-full rounded-full transition-all", p.completionRate === 100 ? "bg-emerald-500" : "bg-primary")}
+                      style={{ width: `${p.completionRate}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Task Origin */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+              Origen de Tareas
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border border-border bg-primary/5 px-4 py-3 text-center">
+                  <p className="text-2xl font-bold text-primary">{kpi.coordinatorTasks}</p>
+                  <p className="text-xs text-muted-foreground">Creadas por Coordinador</p>
+                </div>
+                <div className="rounded-lg border border-border bg-amber-500/5 px-4 py-3 text-center">
+                  <p className="text-2xl font-bold text-amber-600">{kpi.userCreatedTasks}</p>
+                  <p className="text-xs text-muted-foreground">Creadas por Usuarios</p>
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                  <span>Actividades completadas</span>
+                  <span className="font-medium text-foreground">{kpi.completedActivities}/{kpi.totalActivities}</span>
+                </div>
+                <div className="h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-emerald-500 rounded-full transition-all"
+                    style={{ width: `${kpi.totalActivities > 0 ? Math.round((kpi.completedActivities / kpi.totalActivities) * 100) : 0}%` }}
+                  />
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>

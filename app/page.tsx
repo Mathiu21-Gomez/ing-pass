@@ -22,8 +22,14 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (isAuthenticated && user) {
-      const target = user.role === "admin" ? "/admin/dashboard" : "/trabajador/mi-jornada"
-      // Small delay to let exit animation play
+      const target =
+        user.role === "admin"
+          ? "/admin/dashboard"
+          : user.role === "coordinador"
+            ? "/coordinador/dashboard"
+            : user.role === "externo"
+              ? "/externo/proyectos"
+              : "/trabajador/mi-jornada"
       setTimeout(() => router.push(target), 400)
     }
   }, [isAuthenticated, user, router])
@@ -61,7 +67,7 @@ export default function LoginPage() {
           </div>
           <div className="text-center">
             <h1 className="text-2xl font-bold tracking-tight text-foreground text-balance">
-              Ingeniera PASS
+              Ingeniería PASS
             </h1>
             <p className="text-sm text-muted-foreground">
               Control de tiempos y gestión de proyectos
@@ -137,10 +143,26 @@ export default function LoginPage() {
                 <button
                   type="button"
                   className="cursor-pointer text-left hover:text-foreground transition-colors btn-press"
+                  onClick={() => setEmail("pvega@empresa.cl")}
+                >
+                  <span className="font-medium text-foreground">Coordinador:</span>{" "}
+                  pvega@empresa.cl
+                </button>
+                <button
+                  type="button"
+                  className="cursor-pointer text-left hover:text-foreground transition-colors btn-press"
                   onClick={() => setEmail("jperez@empresa.cl")}
                 >
                   <span className="font-medium text-foreground">Trabajador:</span>{" "}
                   jperez@empresa.cl
+                </button>
+                <button
+                  type="button"
+                  className="cursor-pointer text-left hover:text-foreground transition-colors btn-press"
+                  onClick={() => setEmail("cmendoza@mineralosandes.cl")}
+                >
+                  <span className="font-medium text-foreground">Externo:</span>{" "}
+                  cmendoza@mineralosandes.cl
                 </button>
               </div>
             </div>

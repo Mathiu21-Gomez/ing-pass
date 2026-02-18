@@ -2,14 +2,12 @@ import { z } from "zod"
 
 // Validador de RUT chileno con dígito verificador
 function validateRut(rut: string): boolean {
-    // Limpiar el RUT
     const cleanRut = rut.replace(/\./g, "").replace(/-/g, "").toUpperCase()
     if (cleanRut.length < 2) return false
 
     const body = cleanRut.slice(0, -1)
     const dv = cleanRut.slice(-1)
 
-    // Calcular dígito verificador
     let sum = 0
     let multiplier = 2
 
@@ -54,8 +52,9 @@ export const userSchema = z.object({
         .string()
         .min(3, "El nombre debe tener al menos 3 caracteres")
         .max(100, "El nombre no puede exceder 100 caracteres"),
-    email: z.string().email("Email inválido"),
-    role: z.enum(["admin", "trabajador"], {
+    email: z.string().email("Email corporativo inválido"),
+    emailPersonal: z.string().email("Email personal inválido").or(z.literal("")),
+    role: z.enum(["admin", "coordinador", "trabajador", "externo"], {
         required_error: "Selecciona un rol",
     }),
     position: z
@@ -82,6 +81,8 @@ export const projectSchema = z
             .min(10, "La descripción debe tener al menos 10 caracteres")
             .max(500, "La descripción no puede exceder 500 caracteres"),
         clientId: z.string().min(1, "Selecciona un cliente"),
+        coordinatorId: z.string().min(1, "Selecciona un coordinador"),
+        stage: z.string().min(1, "La etapa es requerida"),
         startDate: z.string().min(1, "La fecha de inicio es requerida"),
         endDate: z.string().min(1, "La fecha de fin es requerida"),
         status: z.enum(["Activo", "Pausado", "Finalizado"], {
@@ -114,9 +115,35 @@ export const taskSchema = z.object({
         .string()
         .min(5, "La descripción debe tener al menos 5 caracteres")
         .max(300, "La descripción no puede exceder 300 caracteres"),
+    dueDate: z.string().optional().or(z.literal("")),
 })
 
 export type TaskFormData = z.infer<typeof taskSchema>
+
+// Schema para Actividad
+export const activitySchema = z.object({
+    name: z
+        .string()
+        .min(3, "El nombre debe tener al menos 3 caracteres")
+        .max(100, "El nombre no puede exceder 100 caracteres"),
+    description: z
+        .string()
+        .min(5, "La descripción debe tener al menos 5 caracteres")
+        .max(300, "La descripción no puede exceder 300 caracteres"),
+    dueDate: z.string().optional().or(z.literal("")),
+})
+
+export type ActivityFormData = z.infer<typeof activitySchema>
+
+// Schema para Comentario
+export const commentSchema = z.object({
+    text: z
+        .string()
+        .min(1, "El comentario no puede estar vacío")
+        .max(500, "El comentario no puede exceder 500 caracteres"),
+})
+
+export type CommentFormData = z.infer<typeof commentSchema>
 
 // Helper para formatear errores de Zod
 export function formatZodErrors(

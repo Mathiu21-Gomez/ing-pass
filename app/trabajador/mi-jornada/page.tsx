@@ -1,9 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { useTimer } from "@/lib/contexts/timer-context"
-import { mockProjects, mockTimeEntries } from "@/lib/mock-data"
+import { mockProjects, mockTimeEntries, isEntryEditable } from "@/lib/mock-data"
+import type { TimeEntry } from "@/lib/types"
 import { TimerDisplay } from "@/components/timer-display"
 import { TimerAlerts } from "@/components/timer-alerts"
 import { Button } from "@/components/ui/button"
@@ -24,7 +25,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Play, Pause, Square, UtensilsCrossed, Coffee, TrendingUp, Save, ArrowRightLeft } from "lucide-react"
+import { Play, Pause, Square, UtensilsCrossed, Coffee, TrendingUp, Save, ArrowRightLeft, Pencil, Lock, Clock } from "lucide-react"
+import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
 
 export default function MiJornadaPage() {
@@ -38,21 +40,71 @@ export default function MiJornadaPage() {
   const [switchProject, setSwitchProject] = useState("")
   const [switchTask, setSwitchTask] = useState("")
 
+  // Editable history state
+  const [localEntries, setLocalEntries] = useState<TimeEntry[]>(mockTimeEntries)
+  const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null)
+  const [editNotes, setEditNotes] = useState("")
+  const [editJustification, setEditJustification] = useState("")
+  const [editProgress, setEditProgress] = useState(0)
+
+  // Sync timer-created entries into local state
+  useEffect(() => {
+    if (timer.sessionEntries.length > 0) {
+      setLocalEntries((prev) => {
+        const existingIds = new Set(prev.map((e) => e.id))
+        const newEntries = timer.sessionEntries.filter((e) => !existingIds.has(e.id))
+        return newEntries.length > 0 ? [...newEntries, ...prev] : prev
+      })
+    }
+  }, [timer.sessionEntries])
+
   const assignedProjects = mockProjects.filter(
     (p) => p.assignedWorkers.includes(user?.id ?? "") && p.status === "Activo"
   )
 
   const currentProject = assignedProjects.find((p) => p.id === selectedProject)
-  const tasks = currentProject?.tasks ?? []
+  const tasks = (currentProject?.tasks ?? []).filter((t) => t.status === "abierta")
 
   const switchProjectObj = assignedProjects.find((p) => p.id === switchProject)
-  const switchTasks = switchProjectObj?.tasks ?? []
+  const switchTasks = (switchProjectObj?.tasks ?? []).filter((t) => t.status === "abierta")
 
   // Week entries for this worker
-  const weekEntries = mockTimeEntries
+  const weekEntries = localEntries
     .filter((e) => e.userId === user?.id && e.status === "finalizado")
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 5)
+
+  function openEditEntry(entry: TimeEntry) {
+    setEditingEntry(entry)
+    setEditNotes(entry.notes)
+    setEditJustification(entry.progressJustification)
+    setEditProgress(entry.progressPercentage)
+  }
+
+  function saveEditEntry() {
+    if (!editingEntry) return
+    setLocalEntries((prev) =>
+      prev.map((e) =>
+        e.id === editingEntry.id
+          ? { ...e, notes: editNotes, progressJustification: editJustification, progressPercentage: editProgress }
+          : e
+      )
+    )
+    setEditingEntry(null)
+    toast.success("Registro actualizado correctamente")
+  }
+
+  function getTimeRemaining(entryDate: string, endTime?: string | null): string {
+    const closeTime = endTime ?? "17:00"
+    const entry = new Date(`${entryDate}T${closeTime}:00`)
+    const deadline = new Date(entry.getTime() + 24 * 60 * 60 * 1000)
+    const now = new Date()
+    const diffMs = deadline.getTime() - now.getTime()
+    if (diffMs <= 0) return "Expirado"
+    const hours = Math.floor(diffMs / (1000 * 60 * 60))
+    const mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+    return `${hours}h ${mins}m restantes`
+  }
 
   function handleStart() {
     if (selectedProject && selectedTask) {
@@ -403,20 +455,25 @@ export default function MiJornadaPage() {
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Historial reciente
               </CardTitle>
+              <p className="text-xs text-muted-foreground">Puedes editar los registros dentro de las 12 horas hábiles posteriores al cierre</p>
             </CardHeader>
             <CardContent>
               {weekEntries.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Sin registros anteriores</p>
               ) : (
                 <div className="flex flex-col gap-3">
-                  {weekEntries.map((entry) => {
+                  {weekEntries.map((entry, idx) => {
                     const project = mockProjects.find((p) => p.id === entry.projectId)
+                    const canEdit = entry.editable && isEntryEditable(entry.date, entry.endTime)
                     return (
                       <div
-                        key={entry.id}
-                        className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2"
+                        key={`${entry.id}-${idx}`}
+                        className={`flex items-center justify-between rounded-lg border px-3 py-2 transition-colors ${canEdit
+                          ? "border-primary/20 bg-primary/5 hover:border-primary/40"
+                          : "border-border bg-muted/30"
+                          }`}
                       >
-                        <div>
+                        <div className="flex-1 min-w-0">
                           <p className="text-xs font-medium text-foreground">
                             {new Date(entry.date + "T12:00:00").toLocaleDateString("es-CL", {
                               weekday: "short",
@@ -424,25 +481,48 @@ export default function MiJornadaPage() {
                               month: "short",
                             })}
                           </p>
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xs text-muted-foreground truncate">
                             {project?.name}
                           </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-mono text-sm font-semibold text-foreground">
-                            {entry.effectiveHours}h
-                          </p>
-                          <div className="flex items-center gap-1 justify-end">
-                            <div className="w-8 h-1 bg-muted rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-emerald-500"
-                                style={{ width: `${entry.progressPercentage}%` }}
-                              />
+                          {canEdit && (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <Clock className="h-3 w-3 text-amber-500" />
+                              <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                                {getTimeRemaining(entry.date, entry.endTime)}
+                              </span>
                             </div>
-                            <span className="text-xs text-muted-foreground">
-                              {entry.progressPercentage}%
-                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-right">
+                            <p className="font-mono text-sm font-semibold text-foreground">
+                              {entry.effectiveHours}h
+                            </p>
+                            <div className="flex items-center gap-1 justify-end">
+                              <div className="w-8 h-1 bg-muted rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-emerald-500"
+                                  style={{ width: `${entry.progressPercentage}%` }}
+                                />
+                              </div>
+                              <span className="text-xs text-muted-foreground">
+                                {entry.progressPercentage}%
+                              </span>
+                            </div>
                           </div>
+                          {canEdit ? (
+                            <button
+                              onClick={() => openEditEntry(entry)}
+                              className="rounded-md p-1.5 text-primary hover:bg-primary/10 transition-colors"
+                              aria-label="Editar registro"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                          ) : (
+                            <div className="p-1.5 text-muted-foreground/40">
+                              <Lock className="h-3.5 w-3.5" />
+                            </div>
+                          )}
                         </div>
                       </div>
                     )
@@ -453,6 +533,89 @@ export default function MiJornadaPage() {
           </Card>
         </div>
       </div>
+
+      {/* Edit History Entry Dialog */}
+      <Dialog open={!!editingEntry} onOpenChange={(open) => !open && setEditingEntry(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4 text-primary" />
+              Editar registro
+            </DialogTitle>
+          </DialogHeader>
+          {editingEntry && (
+            <div className="flex flex-col gap-4">
+              {/* Entry info (read-only) */}
+              <div className="rounded-lg border border-border bg-muted/50 p-3">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>
+                    {new Date(editingEntry.date + "T12:00:00").toLocaleDateString("es-CL", {
+                      weekday: "long",
+                      day: "numeric",
+                      month: "long",
+                    })}
+                  </span>
+                  <span className="font-mono font-medium text-foreground">{editingEntry.effectiveHours}h trabajadas</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {editingEntry.startTime} - {editingEntry.endTime}
+                </p>
+              </div>
+
+              {/* Editable: Notes */}
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-sm">Descripción del trabajo</Label>
+                <Textarea
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  rows={2}
+                  placeholder="¿Qué hiciste este día?"
+                />
+              </div>
+
+              {/* Editable: Justification */}
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-sm">Justificación del avance</Label>
+                <Textarea
+                  value={editJustification}
+                  onChange={(e) => setEditJustification(e.target.value)}
+                  rows={2}
+                  placeholder="Explica el porcentaje de avance"
+                />
+              </div>
+
+              {/* Editable: Progress */}
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm">Avance</Label>
+                  <span className="text-sm font-mono font-semibold text-primary">{editProgress}%</span>
+                </div>
+                <Slider
+                  value={[editProgress]}
+                  onValueChange={([v]) => setEditProgress(v)}
+                  max={100}
+                  step={5}
+                />
+              </div>
+
+              {/* Time remaining warning */}
+              <div className="flex items-center gap-2 rounded-lg bg-amber-500/10 px-3 py-2">
+                <Clock className="h-4 w-4 text-amber-500 shrink-0" />
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  {getTimeRemaining(editingEntry.date, editingEntry.endTime)} para editar este registro
+                </p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingEntry(null)}>Cancelar</Button>
+            <Button onClick={saveEditEntry}>
+              <Save className="h-4 w-4 mr-1.5" />
+              Guardar cambios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

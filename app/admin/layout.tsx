@@ -24,12 +24,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     if (!ready) return
     if (!isAuthenticated) {
       router.push("/")
-    } else if (user?.role !== "admin") {
+    } else if (user?.role === "trabajador") {
       router.push("/trabajador/mi-jornada")
     }
   }, [ready, isAuthenticated, user, router])
 
-  if (!isAuthenticated || user?.role !== "admin") {
+  if (!isAuthenticated || user?.role === "trabajador") {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />

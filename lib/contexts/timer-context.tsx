@@ -301,16 +301,17 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       projectId: prev.currentProjectId ?? "",
       taskId: prev.currentTaskId ?? "",
       date: now.toISOString().split("T")[0],
-      startTime: prev.startTime?.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }) ?? "",
-      lunchStartTime: prev.lunchStartTime?.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }) ?? null,
-      lunchEndTime: prev.lunchEndTime?.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }) ?? null,
-      endTime: now.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
+      startTime: prev.startTime?.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", hour12: false }) ?? "",
+      lunchStartTime: prev.lunchStartTime?.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", hour12: false }) ?? null,
+      lunchEndTime: prev.lunchEndTime?.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", hour12: false }) ?? null,
+      endTime: now.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", hour12: false }),
       effectiveHours,
       status: "finalizado",
       notes: `${task?.name ?? "Tarea"} - ${Math.round(effectiveHours)}h trabajadas`,
       progressPercentage: prev.manualProgressPercentage,
       pauseCount: prev.pauseCount,
       progressJustification: lastNote?.note ?? "",
+      editable: true,
     }
 
     return entry
