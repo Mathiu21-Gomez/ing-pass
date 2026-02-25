@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback } from "react"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { timeEntriesApi, projectsApi } from "@/lib/services/api"
 import { useApiData } from "@/hooks/use-api-data"
@@ -50,19 +50,11 @@ export default function TrabajadorHistorialPage() {
 
     const fetchEntries = useCallback(() => timeEntriesApi.getAll(), [])
     const fetchProjects = useCallback(() => projectsApi.getAll(), [])
-    const { data: apiEntries } = useApiData(fetchEntries, [] as TimeEntry[])
+    const { data: entries, setData: setEntries } = useApiData(fetchEntries, [] as TimeEntry[])
     const { data: allProjects } = useApiData(fetchProjects, [] as Project[])
 
-    const [entries, setEntries] = useState<TimeEntry[]>([])
     const [filterProject, setFilterProject] = useState<string>("all")
     const [selectedEntry, setSelectedEntry] = useState<TimeEntry | null>(null)
-
-    // Sync from API when data arrives
-    useMemo(() => {
-        if (apiEntries.length > 0 && entries.length === 0) {
-            setEntries(apiEntries)
-        }
-    }, [apiEntries])
 
     // Edit state
     const [editNotes, setEditNotes] = useState("")

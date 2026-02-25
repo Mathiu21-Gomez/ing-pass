@@ -3,13 +3,14 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { useTimer } from "@/lib/contexts/timer-context"
-import { projectsApi, usersApi } from "@/lib/services/api"
+import { projectsApi, usersApi, tasksApi } from "@/lib/services/api"
 import { useApiData } from "@/hooks/use-api-data"
-import type { Project, User, DaySchedule } from "@/lib/types"
+import type { Project, User, DaySchedule, Task, Activity } from "@/lib/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -44,12 +45,13 @@ import {
   UtensilsCrossed,
   Users,
   Coffee,
+  Plus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { ImageUpload } from "@/components/image-upload"
 import { CommentSection } from "@/components/comment-section"
-import type { Comment, Task, ImageAttachment } from "@/lib/types"
+import type { Comment, ImageAttachment } from "@/lib/types"
 
 // ── Task change entry (for logging task switches during the day) ──
 interface TaskChange {
@@ -66,6 +68,8 @@ export default function MiJornadaPage() {
   const {
     status,
     elapsedWorkSeconds,
+    currentProjectId,
+    currentTaskId,
     startDay,
     pauseWork,
     resumeWork,
@@ -84,7 +88,7 @@ export default function MiJornadaPage() {
 
   const fetchProjects = useCallback(() => projectsApi.getAll(), [])
   const fetchUsers = useCallback(() => usersApi.getAll(), [])
-  const { data: allProjects } = useApiData(fetchProjects, [] as Project[])
+  const { data: allProjects, setData: setAllProjects } = useApiData(fetchProjects, [] as Project[])
   const { data: allUsers } = useApiData(fetchUsers, [] as User[])
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>("")
@@ -94,11 +98,32 @@ export default function MiJornadaPage() {
   const [taskChanges, setTaskChanges] = useState<TaskChange[]>([])
   const [localComments, setLocalComments] = useState<Comment[]>([])
 
+  // Restore project/task selection from timer context on remount
+  useEffect(() => {
+    if (currentProjectId && !selectedProjectId) {
+      setSelectedProjectId(currentProjectId)
+    }
+    if (currentTaskId && !selectedTaskId) {
+      setSelectedTaskId(currentTaskId)
+    }
+  }, [currentProjectId, currentTaskId])
+
   // Pre-start fields
   const [preStartScreenshot, setPreStartScreenshot] = useState<ImageAttachment[]>([])
   const [preStartNotes, setPreStartNotes] = useState("")
   const [showTaskChangeDialog, setShowTaskChangeDialog] = useState(false)
   const [newTaskId, setNewTaskId] = useState("")
+
+  // Create task dialog
+  const [showCreateTaskDialog, setShowCreateTaskDialog] = useState(false)
+  const [newTaskName, setNewTaskName] = useState("")
+  const [newTaskDescription, setNewTaskDescription] = useState("")
+
+  // Create activity dialog
+  const [showCreateActivityDialog, setShowCreateActivityDialog] = useState(false)
+  const [activityTargetTaskId, setActivityTargetTaskId] = useState("")
+  const [newActivityName, setNewActivityName] = useState("")
+  const [newActivityDescription, setNewActivityDescription] = useState("")
 
   // End day dialog
   const [showEndDialog, setShowEndDialog] = useState(false)
@@ -138,6 +163,73 @@ export default function MiJornadaPage() {
     }])
     startDay(selectedProjectId, selectedTaskId, user?.id)
     toast.success("Jornada iniciada")
+  }
+
+  // ─── Create task ─────────────────────
+  async function handleCreateTask() {
+    if (!newTaskName.trim() || !selectedProjectId || !user) return
+
+    try {
+      const created = await projectsApi.createTask(selectedProjectId, {
+        name: newTaskName.trim(),
+        description: newTaskDescription.trim(),
+        assignedTo: [user.id],
+        createdBy: user.id,
+      })
+
+      // Update local projects to include the new task
+      setAllProjects((prev) =>
+        prev.map((p) =>
+          p.id === selectedProjectId
+            ? { ...p, tasks: [...p.tasks, created] }
+            : p
+        )
+      )
+
+      toast.success("Tarea creada exitosamente")
+      setShowCreateTaskDialog(false)
+      setNewTaskName("")
+      setNewTaskDescription("")
+      // Auto-select the new task if not working
+      if (canStart) {
+        setSelectedTaskId(created.id)
+      }
+    } catch {
+      toast.error("Error al crear tarea")
+    }
+  }
+
+  // ─── Create activity ────────────────
+  async function handleCreateActivity() {
+    if (!newActivityName.trim() || !activityTargetTaskId || !user) return
+
+    try {
+      const created = await tasksApi.createActivity(activityTargetTaskId, {
+        name: newActivityName.trim(),
+        description: newActivityDescription.trim(),
+        createdBy: user.id,
+      })
+
+      // Update local projects to include the new activity
+      setAllProjects((prev) =>
+        prev.map((p) => ({
+          ...p,
+          tasks: p.tasks.map((t) =>
+            t.id === activityTargetTaskId
+              ? { ...t, activities: [...t.activities, created] }
+              : t
+          ),
+        }))
+      )
+
+      toast.success("Actividad creada exitosamente")
+      setShowCreateActivityDialog(false)
+      setNewActivityName("")
+      setNewActivityDescription("")
+      setActivityTargetTaskId("")
+    } catch {
+      toast.error("Error al crear actividad")
+    }
   }
 
   // ─── Change task without stopping timer ─────
@@ -353,6 +445,19 @@ export default function MiJornadaPage() {
                   Cambiar tarea
                 </Button>
               )}
+
+              {/* Create task button */}
+              {selectedProjectId && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs mt-1"
+                  onClick={() => setShowCreateTaskDialog(true)}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Nueva Tarea
+                </Button>
+              )}
             </CardContent>
           </Card>
 
@@ -564,22 +669,33 @@ export default function MiJornadaPage() {
                           </div>
 
                           {/* Activities */}
-                          {task.activities.length > 0 && (
-                            <div className="px-3 pb-2.5 flex flex-col gap-0.5 ml-7">
-                              {task.activities.map((a) => (
-                                <div key={a.id} className="flex items-center gap-2 py-0.5">
-                                  {a.completed ? (
-                                    <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />
-                                  ) : (
-                                    <Circle className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-                                  )}
-                                  <span className={cn("text-xs", a.completed ? "text-muted-foreground line-through" : "text-foreground/80")}>
-                                    {a.name}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                          <div className="px-3 pb-2.5 flex flex-col gap-0.5 ml-7">
+                            {task.activities.map((a) => (
+                              <div key={a.id} className="flex items-center gap-2 py-0.5">
+                                {a.completed ? (
+                                  <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />
+                                ) : (
+                                  <Circle className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                                )}
+                                <span className={cn("text-xs", a.completed ? "text-muted-foreground line-through" : "text-foreground/80")}>
+                                  {a.name}
+                                </span>
+                              </div>
+                            ))}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setActivityTargetTaskId(task.id)
+                                setNewActivityName("")
+                                setNewActivityDescription("")
+                                setShowCreateActivityDialog(true)
+                              }}
+                              className="flex items-center gap-1.5 py-1 text-[11px] text-primary/70 hover:text-primary transition-colors"
+                            >
+                              <Plus className="h-3 w-3" />
+                              Agregar actividad
+                            </button>
+                          </div>
                         </div>
                       )
                     })}
@@ -725,6 +841,92 @@ export default function MiJornadaPage() {
               <Square className="h-4 w-4" />
               Finalizar Jornada
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ Create Task Dialog ═══ */}
+      <Dialog open={showCreateTaskDialog} onOpenChange={setShowCreateTaskDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus className="h-4 w-4 text-primary" />
+              Crear Nueva Tarea
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-2">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">Proyecto</Label>
+              <p className="text-sm font-medium text-foreground px-3 py-2 rounded-md bg-muted/50 border border-border">
+                {selectedProject?.name ?? "Sin proyecto"}
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">Nombre de la tarea *</Label>
+              <Input
+                placeholder="Ej: Revisión de planos sector norte"
+                value={newTaskName}
+                onChange={(e) => setNewTaskName(e.target.value)}
+                className="h-9 text-sm"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">Descripción</Label>
+              <Textarea
+                placeholder="Breve descripción de la tarea..."
+                value={newTaskDescription}
+                onChange={(e) => setNewTaskDescription(e.target.value)}
+                rows={2}
+                className="text-sm resize-none"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setShowCreateTaskDialog(false)}>Cancelar</Button>
+            <Button size="sm" onClick={handleCreateTask} disabled={!newTaskName.trim()}>Crear Tarea</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ Create Activity Dialog ═══ */}
+      <Dialog open={showCreateActivityDialog} onOpenChange={setShowCreateActivityDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus className="h-4 w-4 text-primary" />
+              Agregar Actividad
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-2">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">Tarea</Label>
+              <p className="text-sm font-medium text-foreground px-3 py-2 rounded-md bg-muted/50 border border-border">
+                {selectedProject?.tasks.find((t) => t.id === activityTargetTaskId)?.name ?? "—"}
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">Nombre de la actividad *</Label>
+              <Input
+                placeholder="Ej: Verificar cotas del plano A-01"
+                value={newActivityName}
+                onChange={(e) => setNewActivityName(e.target.value)}
+                className="h-9 text-sm"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">Descripción</Label>
+              <Textarea
+                placeholder="Detalle de la actividad..."
+                value={newActivityDescription}
+                onChange={(e) => setNewActivityDescription(e.target.value)}
+                rows={2}
+                className="text-sm resize-none"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setShowCreateActivityDialog(false)}>Cancelar</Button>
+            <Button size="sm" onClick={handleCreateActivity} disabled={!newActivityName.trim()}>Agregar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
