@@ -15,9 +15,10 @@ import Image from "next/image"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [isLoggingIn, setIsLoggingIn] = useState(false)
-  const { login, user, isAuthenticated } = useAuth()
+  const { login, user, isAuthenticated, isLoading } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -34,15 +35,25 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, user, router])
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError("")
-    const success = login(email)
-    if (success) {
-      setIsLoggingIn(true)
-    } else {
-      setError("Credenciales incorrectas o usuario inactivo")
+    setIsLoggingIn(true)
+
+    const result = await login(email, password)
+
+    if (!result.success) {
+      setError(result.error || "Credenciales incorrectas o usuario inactivo")
+      setIsLoggingIn(false)
     }
+  }
+
+  if (isLoading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background p-4">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      </main>
+    )
   }
 
   return (
@@ -50,7 +61,7 @@ export default function LoginPage() {
       <div
         className={cn(
           "w-full max-w-md transition-all duration-500",
-          isLoggingIn && "opacity-0 scale-95 translate-y-4"
+          isLoggingIn && !error && "opacity-0 scale-95 translate-y-4"
         )}
       >
         {/* Logo con float animation */}
@@ -103,7 +114,9 @@ export default function LoginPage() {
                   id="password"
                   type="password"
                   placeholder="••••••••"
-                  defaultValue="demo"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
                   className="transition-all duration-200 focus:ring-2 focus:ring-primary/20"
                 />
               </div>
@@ -116,7 +129,7 @@ export default function LoginPage() {
               )}
 
               <Button type="submit" className="w-full btn-press" disabled={isLoggingIn}>
-                {isLoggingIn ? (
+                {isLoggingIn && !error ? (
                   <div className="flex items-center gap-2">
                     <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
                     Ingresando...
@@ -127,45 +140,7 @@ export default function LoginPage() {
               </Button>
             </form>
 
-            <div className="mt-6 rounded-lg border border-border bg-muted/50 p-4">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">
-                Cuentas de prueba:
-              </p>
-              <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-                <button
-                  type="button"
-                  className="cursor-pointer text-left hover:text-foreground transition-colors btn-press"
-                  onClick={() => setEmail("admin@empresa.cl")}
-                >
-                  <span className="font-medium text-foreground">Admin:</span>{" "}
-                  admin@empresa.cl
-                </button>
-                <button
-                  type="button"
-                  className="cursor-pointer text-left hover:text-foreground transition-colors btn-press"
-                  onClick={() => setEmail("pvega@empresa.cl")}
-                >
-                  <span className="font-medium text-foreground">Coordinador:</span>{" "}
-                  pvega@empresa.cl
-                </button>
-                <button
-                  type="button"
-                  className="cursor-pointer text-left hover:text-foreground transition-colors btn-press"
-                  onClick={() => setEmail("jperez@empresa.cl")}
-                >
-                  <span className="font-medium text-foreground">Trabajador:</span>{" "}
-                  jperez@empresa.cl
-                </button>
-                <button
-                  type="button"
-                  className="cursor-pointer text-left hover:text-foreground transition-colors btn-press"
-                  onClick={() => setEmail("cmendoza@mineralosandes.cl")}
-                >
-                  <span className="font-medium text-foreground">Externo:</span>{" "}
-                  cmendoza@mineralosandes.cl
-                </button>
-              </div>
-            </div>
+
           </CardContent>
         </Card>
       </div>

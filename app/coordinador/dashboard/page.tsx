@@ -3,7 +3,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { mockProjects, mockUsers, getKPIData } from "@/lib/mock-data"
+import { projectsApi, usersApi } from "@/lib/services/api"
+import { useApiData } from "@/hooks/use-api-data"
+import type { Project, User } from "@/lib/types"
 import { useAuth } from "@/lib/contexts/auth-context"
 import {
     BarChart,
@@ -23,15 +25,20 @@ import {
 } from "@/components/ui/chart"
 import { FolderKanban, CheckCircle2, Users, TrendingUp, ListChecks } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useCallback, useMemo } from "react"
 
 const PIE_COLORS = ["hsl(221, 83%, 53%)", "hsl(35, 92%, 55%)"]
 
 export default function CoordinadorDashboard() {
     const { user } = useAuth()
-    const kpi = getKPIData()
+
+    const fetchProjects = useCallback(() => projectsApi.getAll(), [])
+    const fetchUsers = useCallback(() => usersApi.getAll(), [])
+    const { data: allProjects } = useApiData(fetchProjects, [] as Project[])
+    const { data: allUsers } = useApiData(fetchUsers, [] as User[])
 
     // Only projects assigned to this coordinator
-    const myProjects = mockProjects.filter((p) => p.coordinatorId === user?.id)
+    const myProjects = useMemo(() => allProjects.filter((p) => p.coordinatorId === user?.id), [allProjects, user])
 
     // Summary stats
     const allMyTasks = myProjects.flatMap((p) => p.tasks)
@@ -113,7 +120,9 @@ export default function CoordinadorDashboard() {
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-xs text-muted-foreground">Actividades</p>
-                                <p className="text-2xl font-bold mt-1">{kpi.completedActivities}/{kpi.totalActivities}</p>
+                                <p className="text-2xl font-bold mt-1">
+                                    {allMyTasks.flatMap(t => t.activities).filter(a => a.completed).length}/{allMyTasks.flatMap(t => t.activities).length}
+                                </p>
                             </div>
                             <div className="h-10 w-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
                                 <ListChecks className="h-5 w-5 text-amber-500" />
@@ -174,33 +183,44 @@ export default function CoordinadorDashboard() {
                 </CardHeader>
                 <CardContent>
                     <div className="flex flex-col gap-3">
-                        {kpi.progressByUser.map((pw) => (
-                            <div key={pw.userId} className="flex items-center gap-4">
-                                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary shrink-0">
-                                    {pw.userName.charAt(0)}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex items-center justify-between mb-1">
-                                        <p className="text-sm font-medium text-foreground truncate">{pw.userName}</p>
-                                        <div className="flex items-center gap-2">
-                                            <Badge variant="outline" className="text-[10px] h-5">
-                                                {pw.closedTasks}/{pw.totalTasks} tareas
-                                            </Badge>
-                                            <span className={cn(
-                                                "text-xs font-semibold",
-                                                pw.progressRate >= 70 ? "text-emerald-500" : pw.progressRate >= 40 ? "text-amber-500" : "text-muted-foreground"
-                                            )}>
-                                                {pw.progressRate}%
-                                            </span>
+                        {(() => {
+                            const workerIds = [...new Set(myProjects.flatMap(p => p.assignedWorkers))]
+                            return workerIds.map((wid) => {
+                                const wu = allUsers.find(u => u.id === wid)
+                                if (!wu) return null
+                                const workerTasks = allMyTasks.filter(t => t.assignedTo.includes(wid))
+                                const closed = workerTasks.filter(t => t.status === "cerrada").length
+                                const total = workerTasks.length
+                                const rate = total > 0 ? Math.round((closed / total) * 100) : 0
+                                return (
+                                    <div key={wid} className="flex items-center gap-4">
+                                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary shrink-0">
+                                            {wu.name.charAt(0)}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center justify-between mb-1">
+                                                <p className="text-sm font-medium text-foreground truncate">{wu.name}</p>
+                                                <div className="flex items-center gap-2">
+                                                    <Badge variant="outline" className="text-[10px] h-5">
+                                                        {closed}/{total} tareas
+                                                    </Badge>
+                                                    <span className={cn(
+                                                        "text-xs font-semibold",
+                                                        rate >= 70 ? "text-emerald-500" : rate >= 40 ? "text-amber-500" : "text-muted-foreground"
+                                                    )}>
+                                                        {rate}%
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <Progress value={rate} className="h-1.5" />
                                         </div>
                                     </div>
-                                    <Progress value={pw.progressRate} className="h-1.5" />
-                                </div>
-                            </div>
-                        ))}
+                                )
+                            }).filter(Boolean)
+                        })()}
                     </div>
                 </CardContent>
             </Card>
-        </div>
+        </div >
     )
 }

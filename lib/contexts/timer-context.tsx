@@ -10,23 +10,28 @@ import {
   type ReactNode,
 } from "react"
 import type { TimerStatus, HourlyProgress, TimeEntry } from "@/lib/types"
-import { mockTimeEntries, mockProjects } from "@/lib/mock-data"
+import { timeEntriesApi } from "@/lib/services/api"
 
 interface TimerState {
   status: TimerStatus
   elapsedWorkSeconds: number
   elapsedLunchSeconds: number
   elapsedPauseSeconds: number
+  elapsedMeetingSeconds: number
   startTime: Date | null
   lunchStartTime: Date | null
   lunchEndTime: Date | null
   pauseStartTime: Date | null
+  meetingStartTime: Date | null
+  userId: string | null
   currentProjectId: string | null
   currentTaskId: string | null
   showLunchAlert: boolean
   showEndWarning: boolean
   showDaySummary: boolean
   showSwitchTaskDialog: boolean
+  showAutoEndDialog: boolean
+  isExtraTime: boolean
   // Hourly progress tracking
   hourlyProgress: HourlyProgress[]
   showProgressPrompt: boolean
@@ -34,17 +39,20 @@ interface TimerState {
   // Manual progress tracking
   manualProgressPercentage: number
   pauseCount: number
+  meetingCount: number
   progressNotes: { percentage: number; note: string; timestamp: Date }[]
   // Persisted entries from current session
   sessionEntries: TimeEntry[]
 }
 
 interface TimerContextType extends TimerState {
-  startDay: (projectId: string, taskId: string) => void
+  startDay: (projectId: string, taskId: string, userId?: string) => void
   startLunch: () => void
   endLunch: () => void
   pauseWork: () => void
   resumeWork: () => void
+  startMeeting: () => void
+  endMeeting: () => void
   endDay: () => void
   switchTask: (projectId: string, taskId: string) => void
   openSwitchTaskDialog: () => void
@@ -52,12 +60,17 @@ interface TimerContextType extends TimerState {
   dismissLunchAlert: () => void
   dismissEndWarning: () => void
   dismissDaySummary: () => void
+  dismissAutoEndDialog: () => void
+  continueAsExtra: () => void
   formatTime: (seconds: number) => string
   // Hourly progress functions
   recordHourlyProgress: (description: string) => void
   dismissProgressPrompt: () => void
   // Manual progress functions
   updateManualProgress: (percentage: number, note: string) => void
+  // Schedule
+  scheduleEndTime: string | null
+  setScheduleEndTime: (time: string | null) => void
 }
 
 const TimerContext = createContext<TimerContextType | undefined>(undefined)
@@ -73,16 +86,21 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     elapsedWorkSeconds: 0,
     elapsedLunchSeconds: 0,
     elapsedPauseSeconds: 0,
+    elapsedMeetingSeconds: 0,
     startTime: null,
     lunchStartTime: null,
     lunchEndTime: null,
     pauseStartTime: null,
+    meetingStartTime: null,
+    userId: null,
     currentProjectId: null,
     currentTaskId: null,
     showLunchAlert: false,
     showEndWarning: false,
     showDaySummary: false,
     showSwitchTaskDialog: false,
+    showAutoEndDialog: false,
+    isExtraTime: false,
     // Hourly progress tracking
     hourlyProgress: [],
     showProgressPrompt: false,
@@ -90,13 +108,18 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     // Manual progress tracking
     manualProgressPercentage: 0,
     pauseCount: 0,
+    meetingCount: 0,
     progressNotes: [],
     sessionEntries: [],
   })
 
+  const [scheduleEndTime, setScheduleEndTime] = useState<string | null>(null)
+  const stateRef = useRef<TimerState>(state)
+  stateRef.current = state
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lunchAlertShown = useRef(false)
   const endWarningShown = useRef(false)
+  const autoEndShown = useRef(false)
   const hourMilestonesShown = useRef<Set<number>>(new Set())
 
   // Store timestamps for accurate calculation
@@ -145,18 +168,23 @@ export function TimerProvider({ children }: { children: ReactNode }) {
         if (!hourMilestonesShown.current.has(8)) {
           hourMilestonesShown.current.add(8)
         }
-        updates.status = "finalizado"
-        updates.showDaySummary = true
-        updates.showProgressPrompt = false
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current)
-          intervalRef.current = null
+      }
+
+      // Auto-finalize at schedule end time
+      if (scheduleEndTime && !autoEndShown.current && !prev.isExtraTime) {
+        const now = new Date()
+        const [endH, endM] = scheduleEndTime.split(":").map(Number)
+        const endDate = new Date()
+        endDate.setHours(endH, endM, 0, 0)
+        if (now >= endDate) {
+          autoEndShown.current = true
+          updates.showAutoEndDialog = true
         }
       }
 
       return { ...prev, ...updates }
     })
-  }, [])
+  }, [scheduleEndTime])
 
   const startInterval = useCallback(() => {
     if (intervalRef.current) clearInterval(intervalRef.current)
@@ -164,9 +192,10 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   }, [tick])
 
   const startDay = useCallback(
-    (projectId: string, taskId: string) => {
+    (projectId: string, taskId: string, userId?: string) => {
       lunchAlertShown.current = false
       endWarningShown.current = false
+      autoEndShown.current = false
       hourMilestonesShown.current = new Set()
       workStartTimestamp.current = Date.now()
       totalPausedMs.current = 0
@@ -177,21 +206,27 @@ export function TimerProvider({ children }: { children: ReactNode }) {
         elapsedWorkSeconds: 0,
         elapsedLunchSeconds: 0,
         elapsedPauseSeconds: 0,
+        elapsedMeetingSeconds: 0,
         startTime: new Date(),
         lunchStartTime: null,
         lunchEndTime: null,
         pauseStartTime: null,
+        meetingStartTime: null,
+        userId: userId ?? null,
         currentProjectId: projectId,
         currentTaskId: taskId,
         showLunchAlert: false,
         showEndWarning: false,
         showDaySummary: false,
         showSwitchTaskDialog: false,
+        showAutoEndDialog: false,
+        isExtraTime: false,
         hourlyProgress: [],
         showProgressPrompt: false,
         pendingHourMilestone: null,
         manualProgressPercentage: 0,
         pauseCount: 0,
+        meetingCount: 0,
         progressNotes: [],
         sessionEntries: [],
       })
@@ -284,20 +319,13 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     startInterval()
   }, [startInterval])
 
-  // Create and persist TimeEntry
-  const createTimeEntry = useCallback((prev: TimerState): TimeEntry => {
-    const project = mockProjects.find(p => p.id === prev.currentProjectId)
-    const task = project?.tasks.find(t => t.id === prev.currentTaskId)
-
+  const buildTimeEntry = useCallback((prev: TimerState): Omit<TimeEntry, "id"> => {
     const now = new Date()
     const effectiveHours = Math.round((prev.elapsedWorkSeconds / 3600) * 100) / 100
-
-    // Get last progress note as justification
     const lastNote = prev.progressNotes[prev.progressNotes.length - 1]
 
-    const entry: TimeEntry = {
-      id: `te${Date.now()}`,
-      userId: "u2", // Would come from auth context in real app
+    return {
+      userId: prev.userId ?? "",
       projectId: prev.currentProjectId ?? "",
       taskId: prev.currentTaskId ?? "",
       date: now.toISOString().split("T")[0],
@@ -307,57 +335,59 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       endTime: now.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", hour12: false }),
       effectiveHours,
       status: "finalizado",
-      notes: `${task?.name ?? "Tarea"} - ${Math.round(effectiveHours)}h trabajadas`,
+      notes: `Tarea ${prev.currentTaskId ?? ""} - ${Math.round(effectiveHours)}h trabajadas`,
       progressPercentage: prev.manualProgressPercentage,
       pauseCount: prev.pauseCount,
       progressJustification: lastNote?.note ?? "",
       editable: true,
     }
-
-    return entry
   }, [])
 
-  const endDay = useCallback(() => {
+  const persistEntry = useCallback(async (entryData: Omit<TimeEntry, "id">): Promise<TimeEntry> => {
+    try {
+      const saved = await timeEntriesApi.create(entryData)
+      return saved
+    } catch (err) {
+      console.error("Error persisting time entry:", err)
+      return { id: `local_${Date.now()}`, ...entryData }
+    }
+  }, [])
+
+  const endDay = useCallback(async () => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current)
       intervalRef.current = null
     }
-    setState((prev) => {
-      // Create and persist entry
-      const entry = createTimeEntry(prev)
-      mockTimeEntries.unshift(entry) // Add to beginning of array
 
-      return {
-        ...prev,
-        status: "finalizado",
-        showDaySummary: true,
-        sessionEntries: [...prev.sessionEntries, entry],
-      }
-    })
-  }, [createTimeEntry])
+    const entryData = buildTimeEntry(stateRef.current)
+    const saved = await persistEntry(entryData)
 
-  // Switch task mid-day (creates partial entry for previous task)
-  const switchTask = useCallback((newProjectId: string, newTaskId: string) => {
-    setState((prev) => {
-      if (prev.status !== "trabajando" && prev.status !== "pausado") return prev
+    setState((prev) => ({
+      ...prev,
+      status: "finalizado",
+      showDaySummary: true,
+      sessionEntries: [...prev.sessionEntries, saved],
+    }))
+  }, [buildTimeEntry, persistEntry])
 
-      // Create partial entry for current task
-      const partialEntry = createTimeEntry(prev)
-      partialEntry.notes = `[Parcial] ${partialEntry.notes}`
-      mockTimeEntries.unshift(partialEntry)
+  const switchTask = useCallback(async (newProjectId: string, newTaskId: string) => {
+    const current = stateRef.current
+    if (current.status !== "trabajando" && current.status !== "pausado") return
 
-      // Reset for new task but keep time running
-      return {
-        ...prev,
-        currentProjectId: newProjectId,
-        currentTaskId: newTaskId,
-        showSwitchTaskDialog: false,
-        sessionEntries: [...prev.sessionEntries, partialEntry],
-        progressNotes: [],
-        manualProgressPercentage: 0,
-      }
-    })
-  }, [createTimeEntry])
+    const entryData = buildTimeEntry(current)
+    entryData.notes = `[Parcial] ${entryData.notes}`
+    const saved = await persistEntry(entryData)
+
+    setState((prev) => ({
+      ...prev,
+      currentProjectId: newProjectId,
+      currentTaskId: newTaskId,
+      showSwitchTaskDialog: false,
+      sessionEntries: [...prev.sessionEntries, saved],
+      progressNotes: [],
+      manualProgressPercentage: 0,
+    }))
+  }, [buildTimeEntry, persistEntry])
 
   const openSwitchTaskDialog = useCallback(() => {
     setState((prev) => ({ ...prev, showSwitchTaskDialog: true }))
@@ -377,6 +407,88 @@ export function TimerProvider({ children }: { children: ReactNode }) {
 
   const dismissDaySummary = useCallback(() => {
     setState((prev) => ({ ...prev, showDaySummary: false, status: "inactivo" }))
+  }, [])
+
+  // ── Meeting ──
+  const startMeeting = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+    const meetingStart = new Date()
+    // Accumulate pause time if we were paused
+    setState((prev) => {
+      let extraPause = 0
+      if (prev.status === "pausado" && prev.pauseStartTime) {
+        extraPause = Date.now() - prev.pauseStartTime.getTime()
+        totalPausedMs.current += extraPause
+      }
+      return {
+        ...prev,
+        status: "reunion" as const,
+        meetingStartTime: meetingStart,
+        meetingCount: prev.meetingCount + 1,
+        pauseStartTime: null,
+      }
+    })
+    // Track meeting elapsed time
+    const meetingStartMs = Date.now()
+    intervalRef.current = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - meetingStartMs) / 1000)
+      setState((prev) => {
+        if (prev.status !== "reunion") return prev
+        return { ...prev, elapsedMeetingSeconds: prev.elapsedMeetingSeconds + 0 } // just keep interval alive
+      })
+    }, 1000)
+  }, [])
+
+  const endMeeting = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+    setState((prev) => {
+      if (prev.meetingStartTime) {
+        const meetingDuration = Date.now() - prev.meetingStartTime.getTime()
+        totalPausedMs.current += meetingDuration
+        const totalMeetingSecs = Math.floor(meetingDuration / 1000)
+        return {
+          ...prev,
+          status: "trabajando" as const,
+          meetingStartTime: null,
+          elapsedMeetingSeconds: prev.elapsedMeetingSeconds + totalMeetingSecs,
+        }
+      }
+      return { ...prev, status: "trabajando" as const, meetingStartTime: null }
+    })
+    startInterval()
+  }, [startInterval])
+
+  const dismissAutoEndDialog = useCallback(async () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+
+    const entryData = buildTimeEntry(stateRef.current)
+    const saved = await persistEntry(entryData)
+
+    setState((prev) => ({
+      ...prev,
+      status: "finalizado" as const,
+      showAutoEndDialog: false,
+      showDaySummary: true,
+      sessionEntries: [...prev.sessionEntries, saved],
+    }))
+  }, [buildTimeEntry, persistEntry])
+
+  const continueAsExtra = useCallback(() => {
+    // User chose to continue — mark as extra time
+    setState((prev) => ({
+      ...prev,
+      showAutoEndDialog: false,
+      isExtraTime: true,
+    }))
   }, [])
 
   const recordHourlyProgress = useCallback((description: string) => {
@@ -462,6 +574,8 @@ export function TimerProvider({ children }: { children: ReactNode }) {
         endLunch,
         pauseWork,
         resumeWork,
+        startMeeting,
+        endMeeting,
         endDay,
         switchTask,
         openSwitchTaskDialog,
@@ -469,10 +583,14 @@ export function TimerProvider({ children }: { children: ReactNode }) {
         dismissLunchAlert,
         dismissEndWarning,
         dismissDaySummary,
+        dismissAutoEndDialog,
+        continueAsExtra,
         formatTime,
         recordHourlyProgress,
         dismissProgressPrompt,
         updateManualProgress,
+        scheduleEndTime,
+        setScheduleEndTime,
       }}
     >
       {children}

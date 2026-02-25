@@ -1,7 +1,8 @@
 "use client"
 
 import { useAuth } from "@/lib/contexts/auth-context"
-import { mockProjects, mockUsers } from "@/lib/mock-data"
+import { projectsApi, usersApi } from "@/lib/services/api"
+import { useApiData } from "@/hooks/use-api-data"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -15,12 +16,12 @@ import {
     CheckCircle2,
     Circle,
     AlertCircle,
-    User,
+    User as UserIcon,
     LayoutGrid,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useState } from "react"
-import type { Task, TaskStatus } from "@/lib/types"
+import { useState, useCallback, useMemo } from "react"
+import type { Task, TaskStatus, Project, User } from "@/lib/types"
 
 const statusConfig: Record<TaskStatus, { label: string; color: string; bg: string }> = {
     abierta: { label: "Abiertas", color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" },
@@ -33,7 +34,12 @@ export default function CoordinadorEquipoPage() {
     const [filterProject, setFilterProject] = useState<string>("all")
     const [viewMode, setViewMode] = useState<"team" | "status">("team")
 
-    const myProjects = mockProjects.filter((p) => p.coordinatorId === user?.id)
+    const fetchProjects = useCallback(() => projectsApi.getAll(), [])
+    const fetchUsers = useCallback(() => usersApi.getAll(), [])
+    const { data: allProjects } = useApiData(fetchProjects, [] as Project[])
+    const { data: allUsers } = useApiData(fetchUsers, [] as User[])
+
+    const myProjects = useMemo(() => allProjects.filter((p) => p.coordinatorId === user?.id), [allProjects, user])
     const projectsToShow = filterProject === "all" ? myProjects : myProjects.filter((p) => p.id === filterProject)
 
     // Get all tasks with project info
@@ -44,8 +50,8 @@ export default function CoordinadorEquipoPage() {
     // Get unique workers across filtered projects
     const workerIds = [...new Set(projectsToShow.flatMap((p) => p.assignedWorkers))]
     const workers = workerIds
-        .map((id) => mockUsers.find((u) => u.id === id))
-        .filter(Boolean) as typeof mockUsers
+        .map((id) => allUsers.find((u) => u.id === id))
+        .filter(Boolean) as User[]
 
     // Group tasks by worker
     function getTasksForWorker(workerId: string) {
@@ -58,7 +64,7 @@ export default function CoordinadorEquipoPage() {
     }
 
     function TaskCard({ task }: { task: Task & { _projectName: string } }) {
-        const assigned = task.assignedTo.map((id) => mockUsers.find((u) => u.id === id)).filter(Boolean)
+        const assigned = task.assignedTo.map((id) => allUsers.find((u) => u.id === id)).filter(Boolean)
         const progress = task.activities.length > 0
             ? Math.round((task.activities.filter((a) => a.completed).length / task.activities.length) * 100)
             : -1
@@ -146,7 +152,7 @@ export default function CoordinadorEquipoPage() {
                             viewMode === "team" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"
                         )}
                     >
-                        <User className="h-3.5 w-3.5" />
+                        <UserIcon className="h-3.5 w-3.5" />
                         Por persona
                     </button>
                     <button

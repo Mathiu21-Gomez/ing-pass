@@ -5,14 +5,14 @@ import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { useTimer } from "@/lib/contexts/timer-context"
 import { cn } from "@/lib/utils"
-import { FolderKanban, Timer, LogOut, Moon, Sun } from "lucide-react"
+import { History, Timer, LogOut, Moon, Sun } from "lucide-react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import Image from "next/image"
 
 const navItems = [
   { href: "/trabajador/mi-jornada", label: "Mi Jornada", icon: Timer },
-  { href: "/trabajador/mis-proyectos", label: "Mis Proyectos", icon: FolderKanban },
+  { href: "/trabajador/historial", label: "Historial", icon: History },
 ]
 
 function StatusBadge({ status }: { status: string }) {

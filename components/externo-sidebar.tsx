@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import {
     FolderKanban,
-    History,
+    LayoutDashboard,
     LogOut,
     Moon,
     Sun,
@@ -27,7 +27,7 @@ import {
 
 const navItems = [
     { href: "/externo/proyectos", label: "Proyectos", icon: FolderKanban },
-    { href: "/externo/historial", label: "Historial", icon: History },
+    { href: "/externo/dashboard", label: "Dashboard", icon: LayoutDashboard },
 ]
 
 function SidebarContent({ onItemClick }: { onItemClick?: () => void }) {

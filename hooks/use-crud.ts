@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, useEffect } from "react"
 
 export interface UseCrudOptions<T> {
     searchFields?: (keyof T)[]
@@ -15,6 +15,13 @@ export function useCrud<T extends { id: string }>(
     const [dialogOpen, setDialogOpen] = useState(false)
     const [editing, setEditing] = useState<T | null>(null)
     const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+    // Sync items when initialData changes (e.g. async fetch completes)
+    useEffect(() => {
+        if (initialData.length > 0) {
+            setItems(initialData)
+        }
+    }, [initialData])
 
     const add = useCallback((item: T) => {
         setItems((prev) => [...prev, item])
@@ -70,7 +77,6 @@ export function useCrud<T extends { id: string }>(
                     return false
                 })
             }
-            // Default: search all string fields
             return Object.values(item).some(
                 (value) =>
                     typeof value === "string" && value.toLowerCase().includes(searchLower)
@@ -80,6 +86,7 @@ export function useCrud<T extends { id: string }>(
 
     return {
         items,
+        setItems,
         filteredItems,
         search,
         setSearch,

@@ -1,16 +1,24 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { useTimer } from "@/lib/contexts/timer-context"
-import { mockProjects, mockTimeEntries, isEntryEditable } from "@/lib/mock-data"
-import type { TimeEntry } from "@/lib/types"
-import { TimerDisplay } from "@/components/timer-display"
-import { TimerAlerts } from "@/components/timer-alerts"
-import { Button } from "@/components/ui/button"
+import { projectsApi, usersApi } from "@/lib/services/api"
+import { useApiData } from "@/hooks/use-api-data"
+import type { Project, User, DaySchedule } from "@/lib/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Progress } from "@/components/ui/progress"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Slider } from "@/components/ui/slider"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Dialog,
   DialogContent,
@@ -19,599 +27,703 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Play, Pause, Square, UtensilsCrossed, Coffee, TrendingUp, Save, ArrowRightLeft, Pencil, Lock, Clock } from "lucide-react"
-import { Label } from "@/components/ui/label"
+  Play,
+  Pause,
+  Square,
+  Clock,
+  FolderKanban,
+  ListTodo,
+  CheckCircle2,
+  Circle,
+  AlertCircle,
+  ChevronsUpDown,
+  Camera,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
+  UtensilsCrossed,
+  Users,
+  Coffee,
+} from "lucide-react"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { ImageUpload } from "@/components/image-upload"
+import { CommentSection } from "@/components/comment-section"
+import type { Comment, Task, ImageAttachment } from "@/lib/types"
+
+// ── Task change entry (for logging task switches during the day) ──
+interface TaskChange {
+  id: string
+  projectId: string
+  taskId: string
+  taskName: string
+  projectName: string
+  switchedAt: string
+}
 
 export default function MiJornadaPage() {
   const { user } = useAuth()
-  const timer = useTimer()
-  const [selectedProject, setSelectedProject] = useState("")
-  const [selectedTask, setSelectedTask] = useState("")
-  const [progressValue, setProgressValue] = useState(0)
-  const [progressNote, setProgressNote] = useState("")
-  const [showSwitchPanel, setShowSwitchPanel] = useState(false)
-  const [switchProject, setSwitchProject] = useState("")
-  const [switchTask, setSwitchTask] = useState("")
+  const {
+    status,
+    elapsedWorkSeconds,
+    startDay,
+    pauseWork,
+    resumeWork,
+    endDay,
+    startLunch,
+    endLunch,
+    startMeeting,
+    endMeeting,
+    formatTime,
+    showAutoEndDialog,
+    dismissAutoEndDialog,
+    continueAsExtra,
+    isExtraTime,
+    setScheduleEndTime,
+  } = useTimer()
 
-  // Editable history state
-  const [localEntries, setLocalEntries] = useState<TimeEntry[]>(mockTimeEntries)
-  const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null)
-  const [editNotes, setEditNotes] = useState("")
-  const [editJustification, setEditJustification] = useState("")
-  const [editProgress, setEditProgress] = useState(0)
+  const fetchProjects = useCallback(() => projectsApi.getAll(), [])
+  const fetchUsers = useCallback(() => usersApi.getAll(), [])
+  const { data: allProjects } = useApiData(fetchProjects, [] as Project[])
+  const { data: allUsers } = useApiData(fetchUsers, [] as User[])
 
-  // Sync timer-created entries into local state
-  useEffect(() => {
-    if (timer.sessionEntries.length > 0) {
-      setLocalEntries((prev) => {
-        const existingIds = new Set(prev.map((e) => e.id))
-        const newEntries = timer.sessionEntries.filter((e) => !existingIds.has(e.id))
-        return newEntries.length > 0 ? [...newEntries, ...prev] : prev
-      })
-    }
-  }, [timer.sessionEntries])
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("")
+  const [selectedTaskId, setSelectedTaskId] = useState<string>("")
+  const [notes, setNotes] = useState("")
+  const [expandedProject, setExpandedProject] = useState(false)
+  const [taskChanges, setTaskChanges] = useState<TaskChange[]>([])
+  const [localComments, setLocalComments] = useState<Comment[]>([])
 
-  const assignedProjects = mockProjects.filter(
-    (p) => p.assignedWorkers.includes(user?.id ?? "") && p.status === "Activo"
-  )
+  // Pre-start fields
+  const [preStartScreenshot, setPreStartScreenshot] = useState<ImageAttachment[]>([])
+  const [preStartNotes, setPreStartNotes] = useState("")
+  const [showTaskChangeDialog, setShowTaskChangeDialog] = useState(false)
+  const [newTaskId, setNewTaskId] = useState("")
 
-  const currentProject = assignedProjects.find((p) => p.id === selectedProject)
-  const tasks = (currentProject?.tasks ?? []).filter((t) => t.status === "abierta")
+  // End day dialog
+  const [showEndDialog, setShowEndDialog] = useState(false)
+  const [endNotes, setEndNotes] = useState("")
+  const [endProgress, setEndProgress] = useState("50")
+  const [endJustification, setEndJustification] = useState("")
 
-  const switchProjectObj = assignedProjects.find((p) => p.id === switchProject)
-  const switchTasks = (switchProjectObj?.tasks ?? []).filter((t) => t.status === "abierta")
+  // Filter projects assigned to this worker
+  const userId = user?.id ?? "u2"
+  const assignedProjects = useMemo(() => allProjects.filter(
+    (p) => p.assignedWorkers.includes(userId) && p.status === "Activo"
+  ), [allProjects, userId])
 
-  // Week entries for this worker
-  const weekEntries = localEntries
-    .filter((e) => e.userId === user?.id && e.status === "finalizado")
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 5)
+  const selectedProject = allProjects.find((p) => p.id === selectedProjectId)
+  const selectedTask = selectedProject?.tasks.find((t) => t.id === selectedTaskId)
 
-  function openEditEntry(entry: TimeEntry) {
-    setEditingEntry(entry)
-    setEditNotes(entry.notes)
-    setEditJustification(entry.progressJustification)
-    setEditProgress(entry.progressPercentage)
-  }
+  // Available tasks for the selected project (open tasks only)
+  const availableTasks = selectedProject?.tasks.filter((t) => t.status !== "cerrada") ?? []
 
-  function saveEditEntry() {
-    if (!editingEntry) return
-    setLocalEntries((prev) =>
-      prev.map((e) =>
-        e.id === editingEntry.id
-          ? { ...e, notes: editNotes, progressJustification: editJustification, progressPercentage: editProgress }
-          : e
-      )
-    )
-    setEditingEntry(null)
-    toast.success("Registro actualizado correctamente")
-  }
+  // Timer display
+  const timerDisplay = formatTime(elapsedWorkSeconds)
 
-  function getTimeRemaining(entryDate: string, endTime?: string | null): string {
-    const closeTime = endTime ?? "17:00"
-    const entry = new Date(`${entryDate}T${closeTime}:00`)
-    const deadline = new Date(entry.getTime() + 24 * 60 * 60 * 1000)
-    const now = new Date()
-    const diffMs = deadline.getTime() - now.getTime()
-    if (diffMs <= 0) return "Expirado"
-    const hours = Math.floor(diffMs / (1000 * 60 * 60))
-    const mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
-    return `${hours}h ${mins}m restantes`
-  }
-
+  // ─── Start workday ─────────────────
   function handleStart() {
-    if (selectedProject && selectedTask) {
-      timer.startDay(selectedProject, selectedTask)
+    if (!selectedProjectId || !selectedTaskId) {
+      toast.error("Selecciona un proyecto y tarea antes de iniciar")
+      return
     }
+    const task = selectedProject?.tasks.find((t) => t.id === selectedTaskId)
+    setTaskChanges([{
+      id: `tc_${Date.now()}`,
+      projectId: selectedProjectId,
+      taskId: selectedTaskId,
+      taskName: task?.name ?? "",
+      projectName: selectedProject?.name ?? "",
+      switchedAt: new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
+    }])
+    startDay(selectedProjectId, selectedTaskId, user?.id)
+    toast.success("Jornada iniciada")
   }
 
-  function handleSaveProgress() {
-    if (progressNote.trim()) {
-      timer.updateManualProgress(progressValue, progressNote)
-      setProgressNote("")
-      // Update slider to show new value
-      setProgressValue(progressValue)
+  // ─── Change task without stopping timer ─────
+  function handleTaskChange() {
+    if (!newTaskId || newTaskId === selectedTaskId) {
+      setShowTaskChangeDialog(false)
+      return
     }
+    const task = selectedProject?.tasks.find((t) => t.id === newTaskId)
+    setTaskChanges((prev) => [...prev, {
+      id: `tc_${Date.now()}`,
+      projectId: selectedProjectId,
+      taskId: newTaskId,
+      taskName: task?.name ?? "",
+      projectName: selectedProject?.name ?? "",
+      switchedAt: new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
+    }])
+    setSelectedTaskId(newTaskId)
+    setShowTaskChangeDialog(false)
+    setNewTaskId("")
+    toast.success("Tarea cambiada — timer sigue corriendo")
   }
 
-  // Sync slider with timer state
-  const displayProgress = timer.manualProgressPercentage > 0
-    ? timer.manualProgressPercentage
-    : progressValue
+  // ─── End day ────────────────────────
+  function handleEndDay() {
+    endDay()
+    setShowEndDialog(false)
+    toast.success("Jornada finalizada")
+  }
+
+  function handleAddComment(comment: Comment) {
+    if (!selectedTask) return
+    const withParent = { ...comment, parentType: "task" as const, parentId: selectedTask.id }
+    setLocalComments((prev) => [...prev, withParent])
+    toast.success("Comentario agregado")
+  }
+
+  function getTaskComments(taskId: string) {
+    return localComments.filter((c) => c.parentType === "task" && c.parentId === taskId)
+  }
+
+  const isWorking = status === "trabajando" || status === "colacion" || status === "pausado" || status === "reunion"
+  const canStart = status === "inactivo" || status === "finalizado"
+
+  // Set schedule end time for auto-finalize
+  useEffect(() => {
+    if (!user?.id || allUsers.length === 0) return
+    const me = allUsers.find((u) => u.id === user.id)
+    if (!me?.weeklySchedule?.length) return
+    // JS getDay: 0=Sun 1=Mon ... 6=Sat → our schema: 0=Mon ... 6=Sun
+    const jsDay = new Date().getDay()
+    const dayIdx = jsDay === 0 ? 6 : jsDay - 1
+    const todaySchedule = me.weeklySchedule.find((d) => d.dayOfWeek === dayIdx)
+    if (todaySchedule?.isWorkingDay) {
+      setScheduleEndTime(todaySchedule.endTime)
+    }
+  }, [user?.id, allUsers, setScheduleEndTime])
 
   return (
-    <div className="flex flex-col gap-6">
-      <TimerAlerts />
-
+    <div className="flex flex-col gap-6 page-enter">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-foreground">Mi Jornada</h1>
         <p className="text-sm text-muted-foreground">
-          {new Date().toLocaleDateString("es-CL", {
-            weekday: "long",
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-          })}
+          {isWorking
+            ? `Trabajando en ${selectedProject?.name ?? "proyecto"}`
+            : "Selecciona un proyecto y tarea para comenzar tu jornada"}
         </p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Timer - Central */}
-        <div className="lg:col-span-2">
-          <Card>
-            <CardContent className="p-6">
-              <TimerDisplay />
+        {/* ═══════════════════ LEFT: Timer + Controls ═══════════════ */}
+        <div className="lg:col-span-1 flex flex-col gap-4">
+          {/* Timer card */}
+          <Card className="card-hover overflow-hidden">
+            <div className={cn(
+              "h-1.5 transition-all",
+              status === "trabajando" ? "bg-emerald-500 animate-pulse" :
+                status === "colacion" ? "bg-amber-500" :
+                  status === "pausado" ? "bg-orange-500" :
+                    status === "reunion" ? "bg-indigo-500" : "bg-muted"
+            )} />
+            <CardContent className="pt-6 pb-5 flex flex-col items-center gap-4">
+              <p className={cn(
+                "font-mono text-5xl font-bold tabular-nums tracking-tight",
+                status === "trabajando" ? "text-emerald-500" :
+                  status === "colacion" ? "text-amber-500" :
+                    status === "pausado" ? "text-orange-500" :
+                      status === "reunion" ? "text-indigo-500" : "text-muted-foreground"
+              )}>
+                {timerDisplay}
+              </p>
+
+              {isExtraTime && status !== "finalizado" && status !== "inactivo" && (
+                <Badge variant="outline" className="text-amber-600 border-amber-500 animate-pulse">
+                  ⏱ Tiempo extra
+                </Badge>
+              )}
 
               {/* Controls */}
-              <div className="mt-6 flex flex-col gap-4">
-                {timer.status === "inactivo" && (
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {canStart && (
+                  <Button
+                    onClick={handleStart}
+                    disabled={!selectedProjectId || !selectedTaskId}
+                    className="gap-1.5"
+                    size="sm"
+                  >
+                    <Play className="h-4 w-4" />
+                    Iniciar Jornada
+                  </Button>
+                )}
+                {status === "trabajando" && (
                   <>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-xs font-medium text-muted-foreground">Proyecto</label>
-                        <Select value={selectedProject} onValueChange={(v) => { setSelectedProject(v); setSelectedTask("") }}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Seleccionar proyecto" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {assignedProjects.map((p) => (
-                              <SelectItem key={p.id} value={p.id}>
-                                {p.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-xs font-medium text-muted-foreground">Tarea</label>
-                        <Select value={selectedTask} onValueChange={setSelectedTask} disabled={!selectedProject}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Seleccionar tarea" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {tasks.map((t) => (
-                              <SelectItem key={t.id} value={t.id}>
-                                {t.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <Button
-                      onClick={handleStart}
-                      disabled={!selectedProject || !selectedTask}
-                      className="w-full gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
-                      size="lg"
-                    >
-                      <Play className="h-5 w-5" />
-                      Iniciar Jornada
+                    <Button variant="outline" size="sm" className="gap-1.5" onClick={startLunch}>
+                      <UtensilsCrossed className="h-4 w-4" />
+                      Colación
+                    </Button>
+                    <Button variant="outline" size="sm" className="gap-1.5" onClick={pauseWork}>
+                      <Coffee className="h-4 w-4" />
+                      Pausa
+                    </Button>
+                    <Button variant="outline" size="sm" className="gap-1.5 text-indigo-600 border-indigo-300 hover:bg-indigo-50 dark:text-indigo-400 dark:border-indigo-700 dark:hover:bg-indigo-950" onClick={startMeeting}>
+                      <Users className="h-4 w-4" />
+                      Reunión
+                    </Button>
+                    <Button variant="destructive" size="sm" className="gap-1.5" onClick={() => setShowEndDialog(true)}>
+                      <Square className="h-4 w-4" />
+                      Finalizar Día
                     </Button>
                   </>
                 )}
-
-                {timer.status === "trabajando" && (
-                  <div className="flex flex-col gap-3">
-                    <div className="flex gap-3">
-                      <Button
-                        onClick={timer.startLunch}
-                        variant="outline"
-                        className="flex-1 gap-2 border-amber-500/30 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400 bg-transparent"
-                      >
-                        <UtensilsCrossed className="h-4 w-4" />
-                        Ir a Colación
-                      </Button>
-                      <Button
-                        onClick={timer.pauseWork}
-                        variant="outline"
-                        className="flex-1 gap-2 border-orange-500/30 text-orange-600 hover:bg-orange-500/10 dark:text-orange-400 bg-transparent"
-                      >
-                        <Coffee className="h-4 w-4" />
-                        Pausar
-                      </Button>
-                      <Button
-                        onClick={timer.endDay}
-                        variant="outline"
-                        className="flex-1 gap-2 border-destructive/30 text-destructive hover:bg-destructive/10 bg-transparent"
-                      >
-                        <Square className="h-4 w-4" />
-                        Finalizar
-                      </Button>
-                    </div>
-                    {!showSwitchPanel ? (
-                      <Button
-                        onClick={() => {
-                          setSwitchProject(timer.currentProjectId ?? "")
-                          setSwitchTask(timer.currentTaskId ?? "")
-                          setShowSwitchPanel(true)
-                        }}
-                        variant="ghost"
-                        className="gap-2 text-muted-foreground hover:text-foreground"
-                      >
-                        <ArrowRightLeft className="h-4 w-4" />
-                        Cambiar Proyecto/Tarea
-                      </Button>
-                    ) : (
-                      <div className="rounded-lg border border-border bg-muted/30 p-3 flex flex-col gap-3 animate-fade-in-up">
-                        <p className="text-xs font-medium text-muted-foreground">Cambiar a:</p>
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <Select value={switchProject} onValueChange={(v) => { setSwitchProject(v); setSwitchTask("") }}>
-                            <SelectTrigger className="h-9 text-xs">
-                              <SelectValue placeholder="Proyecto" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {assignedProjects.map((p) => (
-                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <Select value={switchTask} onValueChange={setSwitchTask} disabled={!switchProject}>
-                            <SelectTrigger className="h-9 text-xs">
-                              <SelectValue placeholder="Tarea" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {switchTasks.map((t) => (
-                                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="flex-1 h-8 text-xs"
-                            onClick={() => setShowSwitchPanel(false)}
-                          >
-                            Cancelar
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="flex-1 h-8 text-xs gap-1 bg-primary text-primary-foreground"
-                            disabled={!switchProject || !switchTask}
-                            onClick={() => {
-                              timer.switchTask(switchProject, switchTask)
-                              setShowSwitchPanel(false)
-                              toast.success("Proyecto/Tarea cambiado")
-                            }}
-                          >
-                            <ArrowRightLeft className="h-3 w-3" />
-                            Confirmar Cambio
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                {status === "pausado" && (
+                  <>
+                    <Button size="sm" className="gap-1.5" onClick={resumeWork}>
+                      <Play className="h-4 w-4" />
+                      Reanudar
+                    </Button>
+                    <Button variant="destructive" size="sm" className="gap-1.5" onClick={() => setShowEndDialog(true)}>
+                      <Square className="h-4 w-4" />
+                      Finalizar Día
+                    </Button>
+                  </>
                 )}
-
-                {timer.status === "colacion" && (
-                  <Button
-                    onClick={timer.endLunch}
-                    className="w-full gap-2 bg-amber-500 text-white hover:bg-amber-600"
-                    size="lg"
-                  >
-                    <Play className="h-5 w-5" />
-                    Volver de Colación
+                {status === "colacion" && (
+                  <Button size="sm" className="gap-1.5" onClick={endLunch}>
+                    <Play className="h-4 w-4" />
+                    Volver al trabajo
                   </Button>
                 )}
-
-                {timer.status === "pausado" && (
-                  <div className="flex gap-3">
-                    <Button
-                      onClick={timer.resumeWork}
-                      className="flex-1 gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
-                      size="lg"
-                    >
-                      <Play className="h-5 w-5" />
-                      Reanudar Trabajo
-                    </Button>
-                    <Button
-                      onClick={timer.endDay}
-                      variant="outline"
-                      className="gap-2 border-destructive/30 text-destructive hover:bg-destructive/10 bg-transparent"
-                      size="lg"
-                    >
-                      <Square className="h-4 w-4" />
-                      Finalizar
-                    </Button>
-                  </div>
+                {status === "reunion" && (
+                  <Button size="sm" className="gap-1.5 bg-indigo-600 hover:bg-indigo-700" onClick={endMeeting}>
+                    <Play className="h-4 w-4" />
+                    Finalizar Reunión
+                  </Button>
                 )}
               </div>
             </CardContent>
           </Card>
 
-          {/* Manual Progress Card - Only when working */}
-          {timer.status !== "inactivo" && timer.status !== "finalizado" && (
-            <Card className="mt-4">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <TrendingUp className="h-4 w-4 text-emerald-500" />
-                  Actualizar Avance del Proyecto
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs text-muted-foreground">Porcentaje de avance</span>
-                    <span className="text-lg font-bold text-foreground">{progressValue}%</span>
-                  </div>
-                  <Slider
-                    value={[progressValue]}
-                    onValueChange={(v) => setProgressValue(v[0])}
-                    max={100}
-                    step={5}
-                    className="w-full"
-                  />
-                  <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                    <span>0%</span>
-                    <span>50%</span>
-                    <span>100%</span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Nota de avance <span className="text-destructive">*</span>
-                  </label>
-                  <Textarea
-                    value={progressNote}
-                    onChange={(e) => setProgressNote(e.target.value)}
-                    placeholder="Describe el trabajo realizado para justificar el avance..."
-                    className="min-h-[80px] resize-none"
-                  />
-                </div>
-
-                <Button
-                  onClick={handleSaveProgress}
-                  disabled={!progressNote.trim()}
-                  className="w-full gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
-                >
-                  <Save className="h-4 w-4" />
-                  Guardar Avance
-                </Button>
-
-                {/* Progress history */}
-                {timer.progressNotes.length > 0 && (
-                  <div className="border-t border-border pt-3 mt-2">
-                    <p className="text-xs font-medium text-muted-foreground mb-2">Historial de avances:</p>
-                    <div className="space-y-2 max-h-32 overflow-y-auto">
-                      {timer.progressNotes.slice().reverse().map((note, i) => (
-                        <div key={i} className="text-xs rounded-lg bg-muted/50 px-3 py-2">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                              {note.percentage}%
-                            </span>
-                            <span className="text-muted-foreground">
-                              {note.timestamp.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}
-                            </span>
-                          </div>
-                          <p className="text-foreground">{note.note}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-        </div>
-
-        {/* Side panel: Current info + Week History */}
-        <div className="flex flex-col gap-6">
-          {/* Current project/task info */}
-          {timer.status !== "inactivo" && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Trabajando en
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-2">
-                <p className="text-sm font-semibold text-foreground">
-                  {assignedProjects.find((p) => p.id === timer.currentProjectId)?.name ?? selectedProject}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {tasks.find((t) => t.id === timer.currentTaskId)?.name
-                    ?? assignedProjects
-                      .find((p) => p.id === timer.currentProjectId)
-                      ?.tasks.find((t) => t.id === timer.currentTaskId)?.name
-                    ?? ""}
-                </p>
-                {timer.manualProgressPercentage > 0 && (
-                  <div className="mt-2 pt-2 border-t border-border">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">Avance reportado:</span>
-                      <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                        {timer.manualProgressPercentage}%
-                      </span>
-                    </div>
-                    <div className="mt-1 h-1.5 w-full bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-emerald-500 transition-all"
-                        style={{ width: `${timer.manualProgressPercentage}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-                {timer.pauseCount > 0 && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Pausas: {timer.pauseCount}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Week history */}
+          {/* Project & Task selector */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Historial reciente
+              <CardTitle className="text-sm flex items-center gap-2">
+                <FolderKanban className="h-4 w-4 text-primary" />
+                Proyecto y Tarea
               </CardTitle>
-              <p className="text-xs text-muted-foreground">Puedes editar los registros dentro de las 12 horas hábiles posteriores al cierre</p>
             </CardHeader>
-            <CardContent>
-              {weekEntries.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Sin registros anteriores</p>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {weekEntries.map((entry, idx) => {
-                    const project = mockProjects.find((p) => p.id === entry.projectId)
-                    const canEdit = entry.editable && isEntryEditable(entry.date, entry.endTime)
-                    return (
-                      <div
-                        key={`${entry.id}-${idx}`}
-                        className={`flex items-center justify-between rounded-lg border px-3 py-2 transition-colors ${canEdit
-                          ? "border-primary/20 bg-primary/5 hover:border-primary/40"
-                          : "border-border bg-muted/30"
-                          }`}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-foreground">
-                            {new Date(entry.date + "T12:00:00").toLocaleDateString("es-CL", {
-                              weekday: "short",
-                              day: "numeric",
-                              month: "short",
-                            })}
-                          </p>
-                          <p className="text-xs text-muted-foreground truncate">
-                            {project?.name}
-                          </p>
-                          {canEdit && (
-                            <div className="flex items-center gap-1 mt-0.5">
-                              <Clock className="h-3 w-3 text-amber-500" />
-                              <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
-                                {getTimeRemaining(entry.date, entry.endTime)}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="text-right">
-                            <p className="font-mono text-sm font-semibold text-foreground">
-                              {entry.effectiveHours}h
-                            </p>
-                            <div className="flex items-center gap-1 justify-end">
-                              <div className="w-8 h-1 bg-muted rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-emerald-500"
-                                  style={{ width: `${entry.progressPercentage}%` }}
-                                />
-                              </div>
-                              <span className="text-xs text-muted-foreground">
-                                {entry.progressPercentage}%
-                              </span>
-                            </div>
-                          </div>
-                          {canEdit ? (
-                            <button
-                              onClick={() => openEditEntry(entry)}
-                              className="rounded-md p-1.5 text-primary hover:bg-primary/10 transition-colors"
-                              aria-label="Editar registro"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                          ) : (
-                            <div className="p-1.5 text-muted-foreground/40">
-                              <Lock className="h-3.5 w-3.5" />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
+            <CardContent className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Proyecto</Label>
+                <Select
+                  value={selectedProjectId}
+                  onValueChange={(val) => { setSelectedProjectId(val); setSelectedTaskId(""); setExpandedProject(false) }}
+                  disabled={isWorking}
+                >
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder="Seleccionar proyecto" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assignedProjects.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Tarea</Label>
+                <Select
+                  value={selectedTaskId}
+                  onValueChange={setSelectedTaskId}
+                  disabled={!selectedProjectId || isWorking}
+                >
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder="Seleccionar tarea" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableTasks.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Task change button (only while working) */}
+              {isWorking && availableTasks.length > 1 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs mt-1"
+                  onClick={() => { setNewTaskId(""); setShowTaskChangeDialog(true) }}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Cambiar tarea
+                </Button>
               )}
             </CardContent>
           </Card>
+
+          {/* Pre-start info (only before starting) */}
+          {canStart && selectedProjectId && selectedTaskId && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Camera className="h-4 w-4 text-primary" />
+                  Información pre-inicio
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs">Captura de pantalla (opcional)</Label>
+                  <ImageUpload onImagesChange={setPreStartScreenshot} maxImages={2} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs">Notas de inicio</Label>
+                  <Textarea
+                    value={preStartNotes}
+                    onChange={(e) => setPreStartNotes(e.target.value)}
+                    placeholder="Ej: Continuaré con los cálculos del sector norte..."
+                    rows={2}
+                    className="text-sm resize-none"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Task changes log */}
+          {taskChanges.length > 1 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <ChevronsUpDown className="h-4 w-4 text-primary" />
+                  Cambios de tarea hoy
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-col gap-1">
+                  {taskChanges.map((tc, i) => (
+                    <div key={tc.id} className={cn("flex items-center gap-2 px-2 py-1.5 rounded-md", i === taskChanges.length - 1 && "bg-primary/5")}>
+                      <span className="text-[10px] text-muted-foreground font-mono w-10 shrink-0">{tc.switchedAt}</span>
+                      <span className="text-xs truncate">{tc.taskName}</span>
+                      {i === taskChanges.length - 1 && (
+                        <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5 bg-primary/10 text-primary border-primary/20 ml-auto shrink-0">
+                          actual
+                        </Badge>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* ═══════════════████ RIGHT: Project Detail ═══════════════ */}
+        <div className="lg:col-span-2 flex flex-col gap-4">
+          {selectedProject ? (
+            <>
+              {/* Project overview */}
+              <Card className="card-hover">
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <CardTitle className="text-base">{selectedProject.name}</CardTitle>
+                      <p className="text-xs text-muted-foreground mt-1">{selectedProject.description}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-xs shrink-0">
+                        {selectedProject.stage}
+                      </Badge>
+                      <button
+                        onClick={() => setExpandedProject(!expandedProject)}
+                        className="rounded-md p-1 hover:bg-muted transition-colors"
+                      >
+                        {expandedProject ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-4">
+                  {/* Progress */}
+                  {(() => {
+                    const totalAct = selectedProject.tasks.reduce((s, t) => s + t.activities.length, 0)
+                    const compAct = selectedProject.tasks.reduce((s, t) => s + t.activities.filter((a) => a.completed).length, 0)
+                    const progress = totalAct > 0 ? Math.round((compAct / totalAct) * 100) : 0
+                    return (
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-muted-foreground">Avance del proyecto</span>
+                          <span className="text-xs font-bold text-primary">{progress}%</span>
+                        </div>
+                        <Progress value={progress} className="h-2" />
+                        <p className="text-[10px] text-muted-foreground mt-1">{compAct}/{totalAct} actividades completadas</p>
+                      </div>
+                    )
+                  })()}
+
+                  {/* Expanded info */}
+                  {expandedProject && (
+                    <div className="flex flex-col gap-4 pt-2 border-t border-border animate-in slide-in-from-top-2 duration-200">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Coordinador</p>
+                          <p className="text-xs font-medium">
+                            {allUsers.find((u: User) => u.id === selectedProject.coordinatorId)?.name?.split(" ").slice(0, 2).join(" ") ?? "—"}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Periodo</p>
+                          <p className="text-xs font-medium">
+                            {new Date(selectedProject.startDate).toLocaleDateString("es-CL", { month: "short", year: "2-digit" })} – {new Date(selectedProject.endDate).toLocaleDateString("es-CL", { month: "short", year: "2-digit" })}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Equipo</p>
+                          <p className="text-xs font-medium">{selectedProject.assignedWorkers.length} personas</p>
+                        </div>
+                        <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Tareas</p>
+                          <p className="text-xs font-medium">
+                            {selectedProject.tasks.filter((t) => t.status === "cerrada").length}/{selectedProject.tasks.length} completadas
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Documents */}
+                      {selectedProject.documents.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground mb-1.5">Documentos</p>
+                          <div className="flex flex-wrap gap-2">
+                            {selectedProject.documents.map((doc) => (
+                              <div key={doc.id} className="flex items-center gap-1.5 rounded-md bg-muted/40 border border-border px-2.5 py-1.5 text-xs">
+                                📄 {doc.name} <span className="text-muted-foreground">({doc.sizeBytes})</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* All tasks */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <ListTodo className="h-4 w-4 text-primary" />
+                    Tareas del proyecto
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col gap-2">
+                    {selectedProject.tasks.map((task) => {
+                      const tAct = task.activities.length
+                      const tComp = task.activities.filter((a) => a.completed).length
+                      const tProg = tAct > 0 ? Math.round((tComp / tAct) * 100) : 0
+                      const isCurrentTask = task.id === selectedTaskId && isWorking
+                      const taskCommentCount = getTaskComments(task.id).length
+
+                      return (
+                        <div
+                          key={task.id}
+                          className={cn(
+                            "rounded-lg border transition-all",
+                            isCurrentTask
+                              ? "border-primary/30 bg-primary/5 shadow-sm"
+                              : "border-border bg-card hover:bg-muted/30"
+                          )}
+                        >
+                          <div className="flex items-center gap-3 px-3 py-2.5">
+                            {task.status === "cerrada" ? (
+                              <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                            ) : task.status === "pendiente_aprobacion" ? (
+                              <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+                            ) : (
+                              <Circle className="h-4 w-4 text-muted-foreground shrink-0" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className={cn("text-sm font-medium truncate", task.status === "cerrada" && "line-through text-muted-foreground")}>
+                                  {task.name}
+                                </span>
+                                {isCurrentTask && (
+                                  <Badge className="text-[9px] px-1.5 py-0 h-4 bg-primary shrink-0">
+                                    Actual
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground truncate">{task.description}</p>
+                            </div>
+                            {taskCommentCount > 0 && <span className="text-[10px] text-muted-foreground shrink-0">{taskCommentCount} 💬</span>}
+                            {tAct > 0 && (
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="text-[10px] text-muted-foreground">{tComp}/{tAct}</span>
+                                <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden">
+                                  <div
+                                    className={cn("h-full rounded-full", tProg === 100 ? "bg-emerald-500" : "bg-primary")}
+                                    style={{ width: `${tProg}%` }}
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Activities */}
+                          {task.activities.length > 0 && (
+                            <div className="px-3 pb-2.5 flex flex-col gap-0.5 ml-7">
+                              {task.activities.map((a) => (
+                                <div key={a.id} className="flex items-center gap-2 py-0.5">
+                                  {a.completed ? (
+                                    <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />
+                                  ) : (
+                                    <Circle className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                                  )}
+                                  <span className={cn("text-xs", a.completed ? "text-muted-foreground line-through" : "text-foreground/80")}>
+                                    {a.name}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Comments for current task */}
+              {selectedTask && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm">
+                      Comentarios — {selectedTask.name}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <CommentSection
+                      comments={getTaskComments(selectedTask.id)}
+                      onAddComment={handleAddComment}
+                      currentUserId={userId}
+                    />
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          ) : (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-16">
+                <FolderKanban className="h-12 w-12 text-muted-foreground/30 mb-3" />
+                <p className="text-sm text-muted-foreground">Selecciona un proyecto para ver su información</p>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
 
-      {/* Edit History Entry Dialog */}
-      <Dialog open={!!editingEntry} onOpenChange={(open) => !open && setEditingEntry(null)}>
-        <DialogContent className="max-w-md">
+      {/* ─── Task Change Dialog ──────────── */}
+      <Dialog open={showTaskChangeDialog} onOpenChange={setShowTaskChangeDialog}>
+        <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Pencil className="h-4 w-4 text-primary" />
-              Editar registro
+              <RefreshCw className="h-4 w-4 text-primary" />
+              Cambiar tarea
             </DialogTitle>
           </DialogHeader>
-          {editingEntry && (
-            <div className="flex flex-col gap-4">
-              {/* Entry info (read-only) */}
-              <div className="rounded-lg border border-border bg-muted/50 p-3">
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>
-                    {new Date(editingEntry.date + "T12:00:00").toLocaleDateString("es-CL", {
-                      weekday: "long",
-                      day: "numeric",
-                      month: "long",
-                    })}
-                  </span>
-                  <span className="font-mono font-medium text-foreground">{editingEntry.effectiveHours}h trabajadas</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {editingEntry.startTime} - {editingEntry.endTime}
-                </p>
-              </div>
-
-              {/* Editable: Notes */}
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-sm">Descripción del trabajo</Label>
-                <Textarea
-                  value={editNotes}
-                  onChange={(e) => setEditNotes(e.target.value)}
-                  rows={2}
-                  placeholder="¿Qué hiciste este día?"
-                />
-              </div>
-
-              {/* Editable: Justification */}
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-sm">Justificación del avance</Label>
-                <Textarea
-                  value={editJustification}
-                  onChange={(e) => setEditJustification(e.target.value)}
-                  rows={2}
-                  placeholder="Explica el porcentaje de avance"
-                />
-              </div>
-
-              {/* Editable: Progress */}
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between">
-                  <Label className="text-sm">Avance</Label>
-                  <span className="text-sm font-mono font-semibold text-primary">{editProgress}%</span>
-                </div>
-                <Slider
-                  value={[editProgress]}
-                  onValueChange={([v]) => setEditProgress(v)}
-                  max={100}
-                  step={5}
-                />
-              </div>
-
-              {/* Time remaining warning */}
-              <div className="flex items-center gap-2 rounded-lg bg-amber-500/10 px-3 py-2">
-                <Clock className="h-4 w-4 text-amber-500 shrink-0" />
-                <p className="text-xs text-amber-600 dark:text-amber-400">
-                  {getTimeRemaining(editingEntry.date, editingEntry.endTime)} para editar este registro
-                </p>
-              </div>
-            </div>
-          )}
+          <p className="text-xs text-muted-foreground">El timer seguirá corriendo. Solo cambia la tarea activa.</p>
+          <Select value={newTaskId} onValueChange={setNewTaskId}>
+            <SelectTrigger className="h-9 text-sm">
+              <SelectValue placeholder="Seleccionar nueva tarea" />
+            </SelectTrigger>
+            <SelectContent>
+              {availableTasks
+                .filter((t) => t.id !== selectedTaskId)
+                .map((t) => (
+                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingEntry(null)}>Cancelar</Button>
-            <Button onClick={saveEditEntry}>
-              <Save className="h-4 w-4 mr-1.5" />
-              Guardar cambios
+            <Button variant="outline" size="sm" onClick={() => setShowTaskChangeDialog(false)}>Cancelar</Button>
+            <Button size="sm" onClick={handleTaskChange} disabled={!newTaskId}>Cambiar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── End Day Dialog ──────────── */}
+      <Dialog open={showEndDialog} onOpenChange={setShowEndDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Square className="h-4 w-4 text-destructive" />
+              Finalizar Jornada
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-2">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">Notas de cierre</Label>
+              <Textarea
+                value={endNotes}
+                onChange={(e) => setEndNotes(e.target.value)}
+                placeholder="Resumen de lo que hiciste hoy..."
+                rows={2}
+                className="text-sm resize-none"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">Avance de la tarea (%)</Label>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={endProgress}
+                onChange={(e) => setEndProgress(e.target.value)}
+                className="w-full accent-primary"
+              />
+              <p className="text-xs text-center font-semibold text-primary">{endProgress}%</p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">Justificación</Label>
+              <Textarea
+                value={endJustification}
+                onChange={(e) => setEndJustification(e.target.value)}
+                placeholder="Describe qué queda pendiente o por qué el avance es este..."
+                rows={2}
+                className="text-sm resize-none"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEndDialog(false)}>Cancelar</Button>
+            <Button variant="destructive" onClick={handleEndDay}>Finalizar Jornada</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ Auto-end dialog — schedule time reached ═══ */}
+      <Dialog open={showAutoEndDialog} onOpenChange={() => { }}>
+        <DialogContent className="sm:max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Clock className="h-5 w-5 text-amber-500" />
+              Hora de salida alcanzada
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              Tu horario programado ha terminado. ¿Deseas finalizar tu jornada o continuar trabajando como tiempo extra?
+            </p>
+            <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+              <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                Si continúas, el tiempo adicional se registrará como hora extra y podrás editarlo en el historial.
+              </p>
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={continueAsExtra} className="gap-1.5">
+              <Play className="h-4 w-4" />
+              Continuar (Extra)
+            </Button>
+            <Button variant="destructive" onClick={dismissAutoEndDialog} className="gap-1.5">
+              <Square className="h-4 w-4" />
+              Finalizar Jornada
             </Button>
           </DialogFooter>
         </DialogContent>

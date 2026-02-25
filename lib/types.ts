@@ -3,20 +3,29 @@ export type UserRole = "admin" | "coordinador" | "trabajador" | "externo"
 
 export type ProjectStatus = "Activo" | "Pausado" | "Finalizado"
 
-export type TimerStatus = "trabajando" | "colacion" | "pausado" | "finalizado" | "inactivo"
+export type TimerStatus = "trabajando" | "colacion" | "pausado" | "reunion" | "finalizado" | "inactivo"
 
 export type TaskStatus = "abierta" | "cerrada" | "pendiente_aprobacion"
 
 export type WorkerStatus = "disponible" | "en_reunion" | "trabajando" | "ausente"
 
-// ── Documentos (mock: solo metadata, sin archivo real) ──
+// ── Documentos ──
 export interface DocumentAttachment {
   id: string
   name: string
-  type: string        // e.g. "pdf", "dwg", "xlsx"
-  size: string        // e.g. "2.4 MB"
-  uploadedBy: string  // userId
-  uploadedAt: string  // ISO date string
+  type: string
+  sizeBytes: number
+  uploadedBy: string
+  uploadedAt: string
+}
+
+// ── Imagen adjunta ──
+export interface ImageAttachment {
+  id: string
+  name: string
+  url: string
+  uploadedBy: string
+  uploadedAt: string
 }
 
 // ── Cliente ──
@@ -29,42 +38,54 @@ export interface Client {
   address: string
 }
 
+// ── Horario por día ──
+export interface DaySchedule {
+  dayOfWeek: number // 0=Lun … 6=Dom
+  startTime: string
+  endTime: string
+  isWorkingDay: boolean
+  reason: string // Justificación para Sáb/Dom
+}
+
+export const DAY_LABELS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+
 // ── Usuario ──
 export interface User {
   id: string
   name: string
   email: string
-  emailPersonal: string       // email personal
+  emailPersonal: string
   role: UserRole
   position: string
   active: boolean
   avatar?: string
-  scheduleStart: string       // e.g. "08:00"
-  scheduleEnd: string         // e.g. "17:00"
   scheduleType: "fijo" | "libre"
-  workerStatus?: WorkerStatus // solo para trabajadores
+  workerStatus?: WorkerStatus
+  weeklySchedule: DaySchedule[]
 }
 
-// ── Actividad (sub-tarea dentro de una Tarea) ──
+// ── Actividad ──
 export interface Activity {
   id: string
   taskId: string
   name: string
   description: string
   completed: boolean
-  dueDate: string | null       // fecha estimada de finalización
-  createdBy: string            // userId
-  createdAt: string            // ISO date
+  dueDate: string | null
+  createdBy: string
+  createdAt: string
 }
 
-// ── Comentario (puede vivir en tarea o actividad) ──
+// ── Comentario ──
 export interface Comment {
   id: string
   parentType: "task" | "activity"
-  parentId: string             // taskId o activityId
-  authorId: string             // userId
+  parentId: string
+  authorId: string
   text: string
-  createdAt: string            // ISO date
+  createdAt: string
+  imageAttachments?: ImageAttachment[]
+  referenceId?: string
 }
 
 // ── Tarea ──
@@ -73,10 +94,10 @@ export interface Task {
   name: string
   description: string
   projectId: string
-  assignedTo: string[]         // userIds asignados a la tarea
-  createdBy: string            // userId
-  createdAt: string            // ISO date
-  dueDate: string | null       // fecha límite puesta por el usuario
+  assignedTo: string[]
+  createdBy: string
+  createdAt: string
+  dueDate: string | null
   status: TaskStatus
   documents: DocumentAttachment[]
   activities: Activity[]
@@ -88,8 +109,8 @@ export interface Project {
   name: string
   description: string
   clientId: string
-  coordinatorId: string        // userId del coordinador asignado
-  stage: string                // etapa del proyecto (ej: "Diseño", "Construcción")
+  coordinatorId: string
+  stage: string
   startDate: string
   endDate: string
   status: ProjectStatus
@@ -116,7 +137,15 @@ export interface TimeEntry {
   progressPercentage: number
   pauseCount: number
   progressJustification: string
-  editable: boolean             // true si aún está dentro de las 24h de cierre
+  editable: boolean
+}
+
+// ── Time Entry enriched (from API) ──
+export interface TimeEntryEnriched extends TimeEntry {
+  userName: string
+  userPosition: string
+  projectName: string
+  taskName: string
 }
 
 // ── Resumen Diario ──
@@ -136,4 +165,41 @@ export interface HourlyProgress {
   timestamp: Date
   description: string
   percentage: number
+}
+
+// ── Dashboard KPIs (from /api/dashboard/kpis) ──
+export interface DashboardKPIs {
+  tasksByProject: {
+    projectId: string
+    projectName: string
+    totalTasks: number
+    closedTasks: number
+    completionRate: number
+  }[]
+  coordinatorTasks: number
+  userCreatedTasks: number
+  totalTasks: number
+  totalActivities: number
+  completedActivities: number
+  progressByUser: {
+    userId: string
+    userName: string
+    totalActivities: number
+    completedActivities: number
+    progressRate: number
+    totalTasks: number
+    closedTasks: number
+  }[]
+  hoursByProject: { project: string; hours: number }[]
+  hoursByWorker: { worker: string; hours: number; target: number }[]
+  activeWorkersToday: (TimeEntry & {
+    userName: string
+    userPosition: string
+    projectName: string
+    taskName: string
+  })[]
+  weeklyTrend: { day: string; hours: number }[]
+  totalProjects: number
+  activeProjects: number
+  totalWorkers: number
 }

@@ -1,8 +1,9 @@
 "use client"
 
-import { useState } from "react"
-import { mockProjects, mockClients, mockUsers } from "@/lib/mock-data"
-import type { Project, ProjectStatus } from "@/lib/types"
+import { useState, useCallback, useMemo } from "react"
+import { projectsApi, clientsApi, usersApi } from "@/lib/services/api"
+import { useApiData } from "@/hooks/use-api-data"
+import type { Project, ProjectStatus, Client, User } from "@/lib/types"
 import { useCrud } from "@/hooks/use-crud"
 import { projectSchema, formatZodErrors } from "@/lib/schemas"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -38,7 +39,13 @@ const statusConfig: Record<ProjectStatus, { className: string }> = {
 }
 
 export default function ProyectosPage() {
-  const crud = useCrud<Project>(mockProjects)
+  const fetchProjects = useCallback(() => projectsApi.getAll(), [])
+  const fetchClients = useCallback(() => clientsApi.getAll(), [])
+  const fetchUsers = useCallback(() => usersApi.getAll(), [])
+  const { data: apiProjects } = useApiData(fetchProjects, [] as Project[])
+  const { data: clients } = useApiData(fetchClients, [] as Client[])
+  const { data: users } = useApiData(fetchUsers, [] as User[])
+  const crud = useCrud<Project>(apiProjects)
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [form, setForm] = useState({
     name: "",
@@ -53,8 +60,8 @@ export default function ProyectosPage() {
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  const workers = mockUsers.filter((u) => u.role === "trabajador" && u.active)
-  const coordinators = mockUsers.filter((u) => u.role === "coordinador" && u.active)
+  const workers = useMemo(() => users.filter((u) => u.role === "trabajador" && u.active), [users])
+  const coordinators = useMemo(() => users.filter((u) => u.role === "coordinador" && u.active), [users])
 
   const filtered = crud.filteredItems.filter((p) => {
     const matchesSearch =
@@ -96,7 +103,7 @@ export default function ProyectosPage() {
     crud.openEdit(project)
   }
 
-  function handleSave() {
+  async function handleSave() {
     const result = projectSchema.safeParse(form)
     if (!result.success) {
       setErrors(formatZodErrors(result.error))
@@ -104,27 +111,31 @@ export default function ProyectosPage() {
       return
     }
 
-    if (crud.editing) {
-      crud.update(crud.editing.id, { ...form, tasks: crud.editing.tasks, documents: crud.editing.documents, urls: crud.editing.urls })
-      toast.success("Proyecto actualizado")
-    } else {
-      const newProject: Project = {
-        id: `p${Date.now()}`,
-        ...form,
-        tasks: [],
-        documents: [],
-        urls: [],
+    try {
+      if (crud.editing) {
+        await projectsApi.update(crud.editing.id, { ...form, tasks: crud.editing.tasks, documents: crud.editing.documents, urls: crud.editing.urls })
+        crud.update(crud.editing.id, { ...form, tasks: crud.editing.tasks, documents: crud.editing.documents, urls: crud.editing.urls })
+        toast.success("Proyecto actualizado")
+      } else {
+        const newProject = await projectsApi.create(form as Omit<Project, "id" | "tasks" | "documents" | "urls">)
+        crud.add(newProject)
+        toast.success("Proyecto creado")
       }
-      crud.add(newProject)
-      toast.success("Proyecto creado")
+      crud.closeDialog()
+    } catch {
+      toast.error("Error al guardar proyecto")
     }
-    crud.closeDialog()
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (crud.deleteConfirmId) {
-      crud.remove(crud.deleteConfirmId)
-      toast.success("Proyecto eliminado")
+      try {
+        await projectsApi.delete(crud.deleteConfirmId)
+        crud.remove(crud.deleteConfirmId)
+        toast.success("Proyecto eliminado")
+      } catch {
+        toast.error("Error al eliminar proyecto")
+      }
     }
   }
 
@@ -187,8 +198,8 @@ export default function ProyectosPage() {
 
       <div className="grid gap-4 md:grid-cols-2 stagger-children">
         {filtered.map((project) => {
-          const client = mockClients.find((c) => c.id === project.clientId)
-          const assignedUsers = mockUsers.filter((u) => project.assignedWorkers.includes(u.id))
+          const client = clients.find((c) => c.id === project.clientId)
+          const assignedUsers = users.filter((u) => project.assignedWorkers.includes(u.id))
           const progress = getProjectProgress(project)
 
           return (
@@ -311,7 +322,7 @@ export default function ProyectosPage() {
                   <SelectValue placeholder="Seleccionar cliente" />
                 </SelectTrigger>
                 <SelectContent>
-                  {mockClients.map((c) => (
+                  {clients.map((c) => (
                     <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                   ))}
                 </SelectContent>

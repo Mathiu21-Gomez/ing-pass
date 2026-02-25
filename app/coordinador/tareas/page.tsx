@@ -1,9 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useCallback, useMemo } from "react"
 import { useAuth } from "@/lib/contexts/auth-context"
-import { mockProjects, mockUsers, mockComments, getCommentsFor } from "@/lib/mock-data"
-import type { Task, Comment, TaskStatus } from "@/lib/types"
+import { projectsApi, usersApi, tasksApi } from "@/lib/services/api"
+import { useApiData } from "@/hooks/use-api-data"
+import type { Task, Comment, TaskStatus, Project, User } from "@/lib/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -49,8 +50,21 @@ const statusConfig: Record<TaskStatus, { label: string; className: string }> = {
 
 export default function CoordinadorTareasPage() {
     const { user } = useAuth()
-    const [localProjects, setLocalProjects] = useState(mockProjects)
-    const [localComments, setLocalComments] = useState(mockComments)
+
+    const fetchProjects = useCallback(() => projectsApi.getAll(), [])
+    const fetchUsers = useCallback(() => usersApi.getAll(), [])
+    const { data: allApiProjects } = useApiData(fetchProjects, [] as Project[])
+    const { data: allApiUsers } = useApiData(fetchUsers, [] as User[])
+
+    const [localProjects, setLocalProjects] = useState<Project[]>([])
+    const [localComments, setLocalComments] = useState<Comment[]>([])
+
+    // Sync from API when data arrives
+    useMemo(() => {
+        if (allApiProjects.length > 0 && localProjects.length === 0) {
+            setLocalProjects(allApiProjects)
+        }
+    }, [allApiProjects])
 
     // Filters
     const [filterProject, setFilterProject] = useState<string>("all")
@@ -76,7 +90,7 @@ export default function CoordinadorTareasPage() {
 
     // Projects for this coordinator
     const myProjects = localProjects.filter((p) => p.coordinatorId === user?.id)
-    const allWorkers = mockUsers.filter((u) => u.role === "trabajador" && u.active)
+    const allWorkers = allApiUsers.filter((u) => u.role === "trabajador" && u.active)
 
     // Get all tasks across projects
     const allTasks = myProjects.flatMap((p) =>
@@ -101,87 +115,100 @@ export default function CoordinadorTareasPage() {
     const currentTask = getLatestTask()
 
     // ─── Create Task ──────────────────────
-    function handleCreateTask() {
+    async function handleCreateTask() {
         if (!newTaskForm.name.trim() || !newTaskForm.projectId || !user) return
 
-        const newTask: Task = {
-            id: `t${Date.now()}`,
-            name: newTaskForm.name,
-            description: newTaskForm.description,
-            projectId: newTaskForm.projectId,
-            assignedTo: newTaskForm.assignedTo,
-            createdBy: user.id,
-            createdAt: new Date().toISOString(),
-            dueDate: null,
-            status: "abierta",
-            documents: [],
-            activities: [],
-        }
+        try {
+            const created = await projectsApi.createTask(newTaskForm.projectId, {
+                name: newTaskForm.name,
+                description: newTaskForm.description,
+                assignedTo: newTaskForm.assignedTo,
+                createdBy: user.id,
+            })
 
-        setLocalProjects((prev) =>
-            prev.map((p) =>
-                p.id === newTaskForm.projectId
-                    ? { ...p, tasks: [...p.tasks, newTask] }
-                    : p
+            setLocalProjects((prev) =>
+                prev.map((p) =>
+                    p.id === newTaskForm.projectId
+                        ? { ...p, tasks: [...p.tasks, created] }
+                        : p
+                )
             )
-        )
 
-        toast.success("Tarea creada y asignada")
-        setShowCreateDialog(false)
-        setNewTaskForm({ name: "", description: "", projectId: "", assignedTo: [] })
+            toast.success("Tarea creada y asignada")
+            setShowCreateDialog(false)
+            setNewTaskForm({ name: "", description: "", projectId: "", assignedTo: [] })
+        } catch {
+            toast.error("Error al crear tarea")
+        }
     }
 
     // ─── Transfer Task ────────────────────
-    function handleTransfer() {
+    async function handleTransfer() {
         if (!transferTaskId || !transferTo) return
 
-        setLocalProjects((prev) =>
-            prev.map((p) => ({
-                ...p,
-                tasks: p.tasks.map((t) =>
-                    t.id === transferTaskId
-                        ? { ...t, assignedTo: [...t.assignedTo.filter((u) => u !== transferTo), transferTo] }
-                        : t
-                ),
-            }))
-        )
+        const task = localProjects.flatMap((p) => p.tasks).find((t) => t.id === transferTaskId)
+        if (!task) return
 
-        const targetUser = mockUsers.find((u) => u.id === transferTo)
-        toast.success(`Tarea transferida a ${targetUser?.name}`)
-        setShowTransferDialog(false)
-        setTransferTaskId("")
-        setTransferTo("")
+        const newAssigned = [...task.assignedTo.filter((u) => u !== transferTo), transferTo]
+
+        try {
+            await tasksApi.update(transferTaskId, { assignedTo: newAssigned })
+
+            setLocalProjects((prev) =>
+                prev.map((p) => ({
+                    ...p,
+                    tasks: p.tasks.map((t) =>
+                        t.id === transferTaskId ? { ...t, assignedTo: newAssigned } : t
+                    ),
+                }))
+            )
+
+            const targetUser = allApiUsers.find((u) => u.id === transferTo)
+            toast.success(`Tarea transferida a ${targetUser?.name}`)
+            setShowTransferDialog(false)
+            setTransferTaskId("")
+            setTransferTo("")
+        } catch {
+            toast.error("Error al transferir tarea")
+        }
     }
 
     // ─── Add Comment ──────────────────────
-    function handleAddComment() {
+    async function handleAddComment() {
         if (!commentText.trim() || !currentTask || !user) return
 
-        const newComment: Comment = {
-            id: `com${Date.now()}`,
-            parentType: "task",
-            parentId: currentTask.id,
-            authorId: user.id,
-            text: commentText.trim(),
-            createdAt: new Date().toISOString(),
-        }
+        try {
+            const created = await tasksApi.createComment(currentTask.id, {
+                text: commentText.trim(),
+                authorId: user.id,
+                parentType: "task",
+            })
 
-        setLocalComments((prev) => [...prev, newComment])
-        setCommentText("")
-        toast.success("Comentario agregado")
+            setLocalComments((prev) => [...prev, created])
+            setCommentText("")
+            toast.success("Comentario agregado")
+        } catch {
+            toast.error("Error al agregar comentario")
+        }
     }
 
     // ─── Close / Approve task ─────────────
-    function handleStatusChange(taskId: string, newStatus: TaskStatus) {
-        setLocalProjects((prev) =>
-            prev.map((p) => ({
-                ...p,
-                tasks: p.tasks.map((t) =>
-                    t.id === taskId ? { ...t, status: newStatus } : t
-                ),
-            }))
-        )
-        toast.success(newStatus === "cerrada" ? "Tarea cerrada" : "Estado actualizado")
+    async function handleStatusChange(taskId: string, newStatus: TaskStatus) {
+        try {
+            await tasksApi.update(taskId, { status: newStatus })
+
+            setLocalProjects((prev) =>
+                prev.map((p) => ({
+                    ...p,
+                    tasks: p.tasks.map((t) =>
+                        t.id === taskId ? { ...t, status: newStatus } : t
+                    ),
+                }))
+            )
+            toast.success(newStatus === "cerrada" ? "Tarea cerrada" : "Estado actualizado")
+        } catch {
+            toast.error("Error al actualizar estado")
+        }
     }
 
     // ─── Toggle assignedTo user ───────────
@@ -282,7 +309,7 @@ export default function CoordinadorTareasPage() {
                 ) : (
                     filteredTasks.map((task) => {
                         const progress = calcProgress(task)
-                        const assignedUsers = mockUsers.filter((u) => task.assignedTo.includes(u.id))
+                        const assignedUsers = allApiUsers.filter((u) => task.assignedTo.includes(u.id))
                         const comments = getTaskComments(task.id)
 
                         return (
@@ -463,7 +490,7 @@ export default function CoordinadorTareasPage() {
                                     <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                                         <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Creada por</p>
                                         <p className="text-xs font-medium">
-                                            {mockUsers.find((u) => u.id === currentTask.createdBy)?.name?.split(" ")[0] ?? "—"}
+                                            {allApiUsers.find((u) => u.id === currentTask.createdBy)?.name?.split(" ")[0] ?? "—"}
                                         </p>
                                     </div>
                                     <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
@@ -485,7 +512,7 @@ export default function CoordinadorTareasPage() {
                                     <p className="text-xs font-medium text-muted-foreground mb-2">Asignados</p>
                                     <div className="flex flex-wrap gap-2">
                                         {currentTask.assignedTo.map((uid) => {
-                                            const u = mockUsers.find((u) => u.id === uid)
+                                            const u = allApiUsers.find((u) => u.id === uid)
                                             return u ? (
                                                 <div key={uid} className="flex items-center gap-1.5 rounded-full bg-primary/5 border border-primary/10 px-2.5 py-1 text-xs">
                                                     <div className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center text-[9px] font-bold text-primary">
@@ -557,7 +584,7 @@ export default function CoordinadorTareasPage() {
                                             <p className="text-xs text-muted-foreground/50 text-center py-3">Sin comentarios aún</p>
                                         ) : (
                                             getTaskComments(currentTask.id).map((c) => {
-                                                const author = mockUsers.find((u) => u.id === c.authorId)
+                                                const author = allApiUsers.find((u) => u.id === c.authorId)
                                                 return (
                                                     <div key={c.id} className="flex gap-2">
                                                         <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center text-[9px] font-bold text-primary shrink-0 mt-0.5">

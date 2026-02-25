@@ -1,7 +1,9 @@
 "use client"
 
 import { useAuth } from "@/lib/contexts/auth-context"
-import { mockProjects, mockClients, mockUsers } from "@/lib/mock-data"
+import { projectsApi, clientsApi, usersApi, tasksApi } from "@/lib/services/api"
+import { useApiData } from "@/hooks/use-api-data"
+import type { Project, Client, User } from "@/lib/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -15,13 +17,6 @@ import {
     DialogTitle,
     DialogFooter,
 } from "@/components/ui/dialog"
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import {
     FolderKanban,
@@ -30,15 +25,16 @@ import {
     Clock,
     ExternalLink,
     FileText,
-    Lock,
     Users,
     Plus,
     AlertCircle,
+    Hash,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useState } from "react"
-import type { Task } from "@/lib/types"
+import { useState, useCallback, useMemo } from "react"
+import type { Task, Comment } from "@/lib/types"
 import { toast } from "sonner"
+import { CommentSection } from "@/components/comment-section"
 
 const statusConfig: Record<string, { className: string }> = {
     Activo: { className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" },
@@ -54,22 +50,38 @@ const taskStatusConfig: Record<string, { label: string; className: string }> = {
 
 export default function ExternoProyectosPage() {
     const { user } = useAuth()
-    const [localProjects, setLocalProjects] = useState(mockProjects)
+
+    const fetchProjects = useCallback(() => projectsApi.getAll(), [])
+    const fetchClients = useCallback(() => clientsApi.getAll(), [])
+    const fetchUsers = useCallback(() => usersApi.getAll(), [])
+    const { data: allApiProjects } = useApiData(fetchProjects, [] as Project[])
+    const { data: allClients } = useApiData(fetchClients, [] as Client[])
+    const { data: allUsers } = useApiData(fetchUsers, [] as User[])
+
+    const [localProjects, setLocalProjects] = useState<Project[]>([])
     const [selectedTask, setSelectedTask] = useState<Task | null>(null)
     const [selectedProjectName, setSelectedProjectName] = useState("")
+    const [localComments, setLocalComments] = useState<Comment[]>([])
+
+    // Sync from API when data arrives
+    useMemo(() => {
+        if (allApiProjects.length > 0 && localProjects.length === 0) {
+            setLocalProjects(allApiProjects)
+        }
+    }, [allApiProjects])
 
     // Create task dialog
     const [showCreateDialog, setShowCreateDialog] = useState(false)
     const [createProjectId, setCreateProjectId] = useState("")
-    const [newTaskForm, setNewTaskForm] = useState({ name: "", description: "" })
+    const [newTaskForm, setNewTaskForm] = useState({ name: "", description: "", referenceId: "" })
 
     // Find client associated with this external user
-    const client = mockClients.find((c) => c.email === user?.email)
+    const client = useMemo(() => allClients.find((c) => c.email === user?.email), [allClients, user])
 
     // Get projects for this client
-    const clientProjects = client
+    const clientProjects = useMemo(() => client
         ? localProjects.filter((p) => p.clientId === client.id)
-        : localProjects.filter((p) => p.assignedWorkers.includes(user?.id ?? ""))
+        : localProjects.filter((p) => p.assignedWorkers.includes(user?.id ?? "")), [client, localProjects, user])
 
     function calcProgress(task: Task): number {
         if (task.activities.length === 0) return 0
@@ -83,40 +95,77 @@ export default function ExternoProyectosPage() {
     }
 
     // ─── Create task with pendiente_aprobacion ────
-    function handleCreateTask() {
+    async function handleCreateTask() {
         if (!newTaskForm.name.trim() || !createProjectId || !user) return
 
-        const newTask: Task = {
-            id: `t${Date.now()}`,
-            name: newTaskForm.name,
-            description: newTaskForm.description,
-            projectId: createProjectId,
-            assignedTo: [],
-            createdBy: user.id,
-            createdAt: new Date().toISOString(),
-            dueDate: null,
-            status: "pendiente_aprobacion",
-            documents: [],
-            activities: [],
-        }
+        try {
+            const created = await projectsApi.createTask(createProjectId, {
+                name: newTaskForm.name,
+                description: newTaskForm.description,
+                assignedTo: [],
+                createdBy: user.id,
+            })
 
-        setLocalProjects((prev) =>
-            prev.map((p) =>
-                p.id === createProjectId
-                    ? { ...p, tasks: [...p.tasks, newTask] }
-                    : p
+            // API creates with "abierta" by default — update to "pendiente_aprobacion"
+            const updated = await tasksApi.update(created.id, { status: "pendiente_aprobacion" })
+
+            const newTask: Task = {
+                ...created,
+                status: updated.status ?? "pendiente_aprobacion",
+                documents: [],
+                activities: [],
+            }
+
+            setLocalProjects((prev) =>
+                prev.map((p) =>
+                    p.id === createProjectId
+                        ? { ...p, tasks: [...p.tasks, newTask] }
+                        : p
+                )
             )
-        )
 
-        toast.success("Tarea enviada para aprobación del coordinador")
-        setShowCreateDialog(false)
-        setNewTaskForm({ name: "", description: "" })
-        setCreateProjectId("")
+            if (newTaskForm.referenceId.trim()) {
+                const refComment = await tasksApi.createComment(created.id, {
+                    text: `Tarea creada con referencia a documento externo: ${newTaskForm.referenceId.trim()}`,
+                    authorId: user.id,
+                    parentType: "task",
+                    referenceId: newTaskForm.referenceId.trim(),
+                })
+                setLocalComments((prev) => [...prev, refComment])
+            }
+
+            toast.success("Tarea enviada para aprobación del coordinador")
+            setShowCreateDialog(false)
+            setNewTaskForm({ name: "", description: "", referenceId: "" })
+            setCreateProjectId("")
+        } catch {
+            toast.error("Error al crear tarea")
+        }
     }
 
     function openCreateFor(projectId: string) {
         setCreateProjectId(projectId)
         setShowCreateDialog(true)
+    }
+
+    async function handleAddComment(comment: Comment) {
+        if (!selectedTask) return
+        try {
+            const created = await tasksApi.createComment(selectedTask.id, {
+                text: comment.text,
+                authorId: comment.authorId,
+                parentType: "task",
+            })
+            setLocalComments((prev) => [...prev, created])
+            toast.success("Comentario agregado")
+        } catch {
+            toast.error("Error al agregar comentario")
+        }
+    }
+
+    // Get comments for a task
+    function getTaskComments(taskId: string) {
+        return localComments.filter((c) => c.parentType === "task" && c.parentId === taskId)
     }
 
     return (
@@ -140,7 +189,7 @@ export default function ExternoProyectosPage() {
             ) : (
                 <div className="flex flex-col gap-4 stagger-children">
                     {clientProjects.map((project) => {
-                        const coordinator = mockUsers.find((u) => u.id === project.coordinatorId)
+                        const coordinator = allUsers.find((u) => u.id === project.coordinatorId)
                         const projectProgress = calcProjectProgress(project.tasks)
                         const closedTasks = project.tasks.filter((t) => t.status === "cerrada").length
                         const pendingTasks = project.tasks.filter((t) => t.status === "pendiente_aprobacion").length
@@ -190,6 +239,22 @@ export default function ExternoProyectosPage() {
                                         <Progress value={projectProgress} className="h-2" />
                                     </div>
 
+                                    {/* Documents */}
+                                    {project.documents.length > 0 && (
+                                        <div>
+                                            <p className="text-xs font-medium text-muted-foreground mb-1.5">Documentos compartidos</p>
+                                            <div className="flex flex-wrap gap-2">
+                                                {project.documents.map((doc) => (
+                                                    <div key={doc.id} className="flex items-center gap-1.5 rounded-md bg-muted/40 border border-border px-2.5 py-1.5">
+                                                        <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                                                        <span className="text-xs text-foreground">{doc.name}</span>
+                                                        <span className="text-[10px] text-muted-foreground">{doc.sizeBytes}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {/* URLs */}
                                     {project.urls.length > 0 && (
                                         <div className="flex flex-wrap gap-2">
@@ -227,6 +292,7 @@ export default function ExternoProyectosPage() {
                                         <div className="flex flex-col gap-1">
                                             {project.tasks.map((task) => {
                                                 const progress = calcProgress(task)
+                                                const taskCommentCount = getTaskComments(task.id).length
                                                 return (
                                                     <div
                                                         key={task.id}
@@ -247,6 +313,9 @@ export default function ExternoProyectosPage() {
                                                             <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-amber-500/15 text-amber-600 border-amber-500/20">
                                                                 Pendiente
                                                             </Badge>
+                                                        )}
+                                                        {taskCommentCount > 0 && (
+                                                            <span className="text-[10px] text-muted-foreground">{taskCommentCount} 💬</span>
                                                         )}
                                                         {task.activities.length > 0 && (
                                                             <div className="flex items-center gap-2 shrink-0">
@@ -312,6 +381,18 @@ export default function ExternoProyectosPage() {
                                 rows={3}
                             />
                         </div>
+                        <div className="flex flex-col gap-1.5">
+                            <Label className="flex items-center gap-1 text-muted-foreground">
+                                <Hash className="h-3 w-3" />
+                                ID de referencia (documento/trabajo externo)
+                            </Label>
+                            <Input
+                                placeholder="Ej: DOC-2024-0145, PLN-A-003..."
+                                value={newTaskForm.referenceId}
+                                onChange={(e) => setNewTaskForm({ ...newTaskForm, referenceId: e.target.value })}
+                                className="font-mono text-sm"
+                            />
+                        </div>
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancelar</Button>
@@ -322,9 +403,9 @@ export default function ExternoProyectosPage() {
                 </DialogContent>
             </Dialog>
 
-            {/* ─── Task Detail Dialog (read-only) ──── */}
+            {/* ─── Task Detail Dialog with Comments ──── */}
             <Dialog open={!!selectedTask} onOpenChange={(open) => !open && setSelectedTask(null)}>
-                <DialogContent className="sm:max-w-md">
+                <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
                     {selectedTask && (
                         <>
                             <DialogHeader>
@@ -379,9 +460,13 @@ export default function ExternoProyectosPage() {
                                     </>
                                 )}
 
-                                <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 rounded-lg px-3 py-2 border border-border">
-                                    <Lock className="h-3.5 w-3.5" />
-                                    Vista de solo lectura
+                                {/* Comments Section */}
+                                <div className="border-t border-border pt-4">
+                                    <CommentSection
+                                        comments={getTaskComments(selectedTask.id)}
+                                        onAddComment={handleAddComment}
+                                        currentUserId={user?.id ?? ""}
+                                    />
                                 </div>
                             </div>
 

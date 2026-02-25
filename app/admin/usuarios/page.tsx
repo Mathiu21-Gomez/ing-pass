@@ -1,8 +1,10 @@
 "use client"
 
-import { useState } from "react"
-import { mockUsers } from "@/lib/mock-data"
-import type { User, UserRole } from "@/lib/types"
+import { useState, useCallback } from "react"
+import { usersApi } from "@/lib/services/api"
+import { useApiData } from "@/hooks/use-api-data"
+import type { User, UserRole, DaySchedule } from "@/lib/types"
+import { DAY_LABELS } from "@/lib/types"
 import { useCrud } from "@/hooks/use-crud"
 import { userSchema, formatZodErrors } from "@/lib/schemas"
 import { Button } from "@/components/ui/button"
@@ -37,14 +39,32 @@ import {
 } from "@/components/ui/table"
 
 export default function UsuariosPage() {
-  const crud = useCrud<User>(mockUsers, {
+  const fetchUsers = useCallback(() => usersApi.getAll(), [])
+  const { data: apiUsers } = useApiData(fetchUsers, [] as User[])
+  const crud = useCrud<User>(apiUsers, {
     searchFields: ["name", "email", "position"],
   })
-  const [form, setForm] = useState({ name: "", email: "", emailPersonal: "", role: "trabajador" as UserRole, position: "", active: true, scheduleType: "fijo" as "fijo" | "libre", scheduleStart: "08:00", scheduleEnd: "17:00" })
+  const DEFAULT_SCHEDULE: DaySchedule[] = Array.from({ length: 7 }, (_, i) => ({
+    dayOfWeek: i,
+    startTime: "08:00",
+    endTime: "17:00",
+    isWorkingDay: i < 5,
+    reason: "",
+  }))
+
+  const [form, setForm] = useState({ name: "", email: "", emailPersonal: "", role: "trabajador" as UserRole, position: "", active: true, scheduleType: "fijo" as "fijo" | "libre" })
+  const [schedule, setSchedule] = useState<DaySchedule[]>(DEFAULT_SCHEDULE)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
+  function updateDay(dayOfWeek: number, patch: Partial<DaySchedule>) {
+    setSchedule((prev) =>
+      prev.map((d) => (d.dayOfWeek === dayOfWeek ? { ...d, ...patch } : d))
+    )
+  }
+
   function openNew() {
-    setForm({ name: "", email: "", emailPersonal: "", role: "trabajador", position: "", active: true, scheduleType: "fijo", scheduleStart: "08:00", scheduleEnd: "17:00" })
+    setForm({ name: "", email: "", emailPersonal: "", role: "trabajador", position: "", active: true, scheduleType: "fijo" })
+    setSchedule(DEFAULT_SCHEDULE)
     setErrors({})
     crud.openCreate()
   }
@@ -58,14 +78,13 @@ export default function UsuariosPage() {
       position: user.position,
       active: user.active,
       scheduleType: user.scheduleType,
-      scheduleStart: user.scheduleStart,
-      scheduleEnd: user.scheduleEnd,
     })
+    setSchedule(user.weeklySchedule.length > 0 ? user.weeklySchedule : DEFAULT_SCHEDULE)
     setErrors({})
     crud.openEdit(user)
   }
 
-  function handleSave() {
+  async function handleSave() {
     const result = userSchema.safeParse(form)
     if (!result.success) {
       setErrors(formatZodErrors(result.error))
@@ -73,21 +92,33 @@ export default function UsuariosPage() {
       return
     }
 
-    if (crud.editing) {
-      crud.update(crud.editing.id, form)
-      toast.success("Usuario actualizado")
-    } else {
-      const newUser: User = { id: `u${Date.now()}`, ...form }
-      crud.add(newUser)
-      toast.success("Usuario creado")
+    const payload = { ...form, weeklySchedule: schedule }
+
+    try {
+      if (crud.editing) {
+        const updated = await usersApi.update(crud.editing.id, payload)
+        crud.update(crud.editing.id, updated)
+        toast.success("Usuario actualizado")
+      } else {
+        const newUser = await usersApi.create(payload as Omit<User, "id">)
+        crud.add(newUser)
+        toast.success("Usuario creado")
+      }
+      crud.closeDialog()
+    } catch {
+      toast.error("Error al guardar usuario")
     }
-    crud.closeDialog()
   }
 
-  function toggleActive(id: string) {
-    const user = crud.items.find((u) => u.id === id)
-    if (user) {
-      crud.update(id, { active: !user.active })
+  async function toggleActive(id: string) {
+    const u = crud.items.find((u) => u.id === id)
+    if (u) {
+      try {
+        await usersApi.update(id, { active: !u.active })
+        crud.update(id, { active: !u.active })
+      } catch {
+        toast.error("Error al cambiar estado")
+      }
     }
   }
 
@@ -233,7 +264,12 @@ export default function UsuariosPage() {
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">Horario</span>
                 <span className="text-xs text-foreground font-mono">
-                  {user.scheduleType === "libre" ? "Libre (24h)" : `${user.scheduleStart} - ${user.scheduleEnd}`}
+                  {user.scheduleType === "libre" ? "Libre (24h)" : (() => {
+                    const workDays = user.weeklySchedule?.filter((d) => d.isWorkingDay) ?? []
+                    if (workDays.length === 0) return "Sin horario"
+                    const first = workDays[0]
+                    return `${workDays.length}d · ${first.startTime}-${first.endTime}`
+                  })()}
                 </span>
               </div>
             </div>
@@ -317,10 +353,11 @@ export default function UsuariosPage() {
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Tipo de horario</span>
                 <Select value={form.scheduleType} onValueChange={(v: "fijo" | "libre") => {
+                  setForm({ ...form, scheduleType: v })
                   if (v === "libre") {
-                    setForm({ ...form, scheduleType: v, scheduleStart: "00:00", scheduleEnd: "23:59" })
+                    setSchedule((prev) => prev.map((d) => ({ ...d, startTime: "00:00", endTime: "23:59", isWorkingDay: true })))
                   } else {
-                    setForm({ ...form, scheduleType: v, scheduleStart: "08:00", scheduleEnd: "17:00" })
+                    setSchedule(DEFAULT_SCHEDULE)
                   }
                 }}>
                   <SelectTrigger className="w-32 h-8 text-xs">
@@ -333,25 +370,58 @@ export default function UsuariosPage() {
                 </Select>
               </div>
               {form.scheduleType === "fijo" && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="flex flex-col gap-1">
-                    <Label className="text-xs text-muted-foreground">Entrada</Label>
-                    <Input
-                      type="time"
-                      value={form.scheduleStart}
-                      onChange={(e) => setForm({ ...form, scheduleStart: e.target.value })}
-                      className="h-8 text-sm font-mono"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label className="text-xs text-muted-foreground">Salida</Label>
-                    <Input
-                      type="time"
-                      value={form.scheduleEnd}
-                      onChange={(e) => setForm({ ...form, scheduleEnd: e.target.value })}
-                      className="h-8 text-sm font-mono"
-                    />
-                  </div>
+                <div className="space-y-1.5">
+                  {schedule.map((day) => {
+                    const isWeekend = day.dayOfWeek >= 5
+                    return (
+                      <div key={day.dayOfWeek} className={cn(
+                        "flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors",
+                        !day.isWorkingDay && "opacity-50",
+                        isWeekend && day.isWorkingDay && "bg-amber-500/10 border border-amber-500/20 rounded"
+                      )}>
+                        <Switch
+                          checked={day.isWorkingDay}
+                          onCheckedChange={(v) => updateDay(day.dayOfWeek, { isWorkingDay: v, reason: v && isWeekend ? day.reason : "" })}
+                          className="scale-75"
+                        />
+                        <span className={cn(
+                          "text-xs font-medium w-12",
+                          isWeekend && "text-amber-600 dark:text-amber-400"
+                        )}>
+                          {DAY_LABELS[day.dayOfWeek].slice(0, 3)}
+                        </span>
+                        {day.isWorkingDay ? (
+                          <>
+                            <Input
+                              type="time"
+                              value={day.startTime}
+                              onChange={(e) => updateDay(day.dayOfWeek, { startTime: e.target.value })}
+                              className="h-7 text-xs font-mono w-24"
+                            />
+                            <span className="text-muted-foreground text-xs">→</span>
+                            <Input
+                              type="time"
+                              value={day.endTime}
+                              onChange={(e) => updateDay(day.dayOfWeek, { endTime: e.target.value })}
+                              className="h-7 text-xs font-mono w-24"
+                            />
+                            {isWeekend && (
+                              <Input
+                                placeholder="Motivo..."
+                                value={day.reason}
+                                onChange={(e) => updateDay(day.dayOfWeek, { reason: e.target.value })}
+                                className="h-7 text-xs flex-1"
+                              />
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-xs text-muted-foreground italic">
+                            {isWeekend ? "No laboral" : "Día libre"}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               )}
               {form.scheduleType === "libre" && (

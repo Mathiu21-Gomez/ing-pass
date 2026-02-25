@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
-import { mockClients } from "@/lib/mock-data"
+import { useState, useCallback } from "react"
+import { clientsApi } from "@/lib/services/api"
+import { useApiData } from "@/hooks/use-api-data"
 import type { Client } from "@/lib/types"
 import { useCrud } from "@/hooks/use-crud"
 import { clientSchema, formatZodErrors } from "@/lib/schemas"
@@ -21,7 +22,9 @@ import { Plus, Pencil, Trash2, Search, Building2 } from "lucide-react"
 import { toast } from "sonner"
 
 export default function ClientesPage() {
-  const crud = useCrud<Client>(mockClients, {
+  const fetchClients = useCallback(() => clientsApi.getAll(), [])
+  const { data: apiClients, loading } = useApiData(fetchClients, [] as Client[])
+  const crud = useCrud<Client>(apiClients, {
     searchFields: ["name", "rut", "email"],
   })
   const [form, setForm] = useState({ name: "", rut: "", contact: "", email: "", address: "" })
@@ -45,7 +48,7 @@ export default function ClientesPage() {
     crud.openEdit(client)
   }
 
-  function handleSave() {
+  async function handleSave() {
     const result = clientSchema.safeParse(form)
     if (!result.success) {
       setErrors(formatZodErrors(result.error))
@@ -53,21 +56,31 @@ export default function ClientesPage() {
       return
     }
 
-    if (crud.editing) {
-      crud.update(crud.editing.id, form)
-      toast.success("Cliente actualizado")
-    } else {
-      const newClient: Client = { id: `c${Date.now()}`, ...form }
-      crud.add(newClient)
-      toast.success("Cliente creado")
+    try {
+      if (crud.editing) {
+        await clientsApi.update(crud.editing.id, form)
+        crud.update(crud.editing.id, form)
+        toast.success("Cliente actualizado")
+      } else {
+        const newClient = await clientsApi.create(form as Omit<Client, "id">)
+        crud.add(newClient)
+        toast.success("Cliente creado")
+      }
+      crud.closeDialog()
+    } catch {
+      toast.error("Error al guardar cliente")
     }
-    crud.closeDialog()
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (crud.deleteConfirmId) {
-      crud.remove(crud.deleteConfirmId)
-      toast.success("Cliente eliminado")
+      try {
+        await clientsApi.delete(crud.deleteConfirmId)
+        crud.remove(crud.deleteConfirmId)
+        toast.success("Cliente eliminado")
+      } catch {
+        toast.error("Error al eliminar cliente")
+      }
     }
   }
 

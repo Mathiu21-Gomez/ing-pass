@@ -1,10 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useCallback, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { getAllWorkersStatus, getWorkerHistory, mockProjects, mockUsers, mockTimeEntries } from "@/lib/mock-data"
+import { getAllWorkersStatus, getWorkerHistory } from "@/lib/helpers"
+import { projectsApi, usersApi, timeEntriesApi } from "@/lib/services/api"
+import { useApiData } from "@/hooks/use-api-data"
+import type { Project, User, TimeEntryEnriched } from "@/lib/types"
 import {
     ChevronDown,
     Clock,
@@ -12,7 +15,7 @@ import {
     Pause,
     TrendingUp,
     Calendar,
-    User,
+    User as UserIcon,
     Download,
     FileSpreadsheet,
 } from "lucide-react"
@@ -38,8 +41,15 @@ export default function HistorialPage() {
     const [startDate, setStartDate] = useState<string>("")
     const [endDate, setEndDate] = useState<string>("")
 
-    const workers = getAllWorkersStatus()
-    const activeProjects = mockProjects.filter(p => p.status === "Activo")
+    const fetchProjects = useCallback(() => projectsApi.getAll(), [])
+    const fetchUsers = useCallback(() => usersApi.getAll(), [])
+    const fetchEntries = useCallback(() => timeEntriesApi.getAll(), [])
+    const { data: allProjects } = useApiData(fetchProjects, [] as Project[])
+    const { data: allUsers } = useApiData(fetchUsers, [] as User[])
+    const { data: allEntries } = useApiData(fetchEntries, [] as TimeEntryEnriched[])
+
+    const workers = useMemo(() => getAllWorkersStatus(allUsers, allEntries, allProjects), [allUsers, allEntries, allProjects])
+    const activeProjects = useMemo(() => allProjects.filter(p => p.status === "Activo"), [allProjects])
 
     const filteredWorkers = projectFilter === "all"
         ? workers
@@ -51,7 +61,7 @@ export default function HistorialPage() {
 
     // Export entries to CSV
     function exportToCSV() {
-        const entriesToExport = mockTimeEntries.filter(e => {
+        const entriesToExport = allEntries.filter(e => {
             const entryDate = new Date(e.date)
             const start = startDate ? new Date(startDate) : null
             const end = endDate ? new Date(endDate) : null
@@ -65,8 +75,8 @@ export default function HistorialPage() {
 
         const headers = ["Fecha", "Trabajador", "Proyecto", "Inicio", "Fin", "Horas", "Avance %", "Pausas", "Notas"]
         const rows = entriesToExport.map(e => {
-            const user = mockUsers.find(u => u.id === e.userId)
-            const project = mockProjects.find(p => p.id === e.projectId)
+            const user = allUsers.find(u => u.id === e.userId)
+            const project = allProjects.find(p => p.id === e.projectId)
             return [
                 e.date,
                 user?.name ?? "",
@@ -148,7 +158,7 @@ export default function HistorialPage() {
             <div className="flex flex-col gap-4 stagger-children">
                 {filteredWorkers.map((worker) => {
                     const isExpanded = expandedWorker === worker.id
-                    const history = isExpanded ? getWorkerHistory(worker.id) : null
+                    const history = isExpanded ? getWorkerHistory(worker.id, allUsers, allEntries, allProjects) : null
                     const sc = worker.todayEntry
                         ? statusColors[worker.todayEntry.status] ?? statusColors.finalizado
                         : null
@@ -164,7 +174,7 @@ export default function HistorialPage() {
                                     <div className="flex items-center gap-4">
                                         {/* Avatar */}
                                         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                                            <User className="h-6 w-6 text-primary" />
+                                            <UserIcon className="h-6 w-6 text-primary" />
                                         </div>
 
                                         {/* Name & Position */}

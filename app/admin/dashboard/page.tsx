@@ -25,18 +25,12 @@ import {
 } from "@/components/ui/table"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { AnimatedCounter } from "@/components/animated-counter"
-import {
-  getHoursByProject,
-  getHoursByWorker,
-  getActiveWorkersToday,
-  getKPIData,
-  mockUsers,
-  mockProjects,
-  mockTimeEntries,
-} from "@/lib/mock-data"
+import { dashboardApi } from "@/lib/services/api"
+import { useApiData } from "@/hooks/use-api-data"
+import type { DashboardKPIs } from "@/lib/types"
 import { Users, Clock, FolderKanban, TrendingUp, ListChecks, CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import React from "react"
+import React, { useCallback, useMemo } from "react"
 
 const statusColors: Record<string, { bg: string; text: string; label: string }> = {
   trabajando: { bg: "bg-emerald-500/15", text: "text-emerald-600 dark:text-emerald-400", label: "Trabajando" },
@@ -54,31 +48,43 @@ const CHART_COLORS = [
   "hsl(270, 60%, 55%)",
 ]
 
-export default function AdminDashboard() {
-  const hoursByProject = getHoursByProject()
-  const hoursByWorker = getHoursByWorker()
-  const activeToday = getActiveWorkersToday()
-  const kpi = getKPIData()
+const emptyKpis: DashboardKPIs = {
+  tasksByProject: [],
+  coordinatorTasks: 0,
+  userCreatedTasks: 0,
+  totalTasks: 0,
+  totalActivities: 0,
+  completedActivities: 0,
+  progressByUser: [],
+  hoursByProject: [],
+  hoursByWorker: [],
+  activeWorkersToday: [],
+  weeklyTrend: [],
+  totalProjects: 0,
+  activeProjects: 0,
+  totalWorkers: 0,
+}
 
-  const activeWorkers = mockUsers.filter((u) => u.role === "trabajador" && u.active).length
-  const activeProjects = mockProjects.filter((p) => p.status === "Activo").length
+export default function AdminDashboard() {
+  const fetchKpis = useCallback(() => dashboardApi.getKpis(), [])
+  const { data: kpiData } = useApiData(fetchKpis, emptyKpis)
+
+  const hoursByProject = kpiData.hoursByProject
+  const hoursByWorker = kpiData.hoursByWorker
+  const activeToday = kpiData.activeWorkersToday
+  const kpi = kpiData
+
+  const activeWorkers = kpiData.totalWorkers
+  const activeProjects = kpiData.activeProjects
   const totalHoursToday = activeToday.reduce((acc, e) => acc + e.effectiveHours, 0)
+  const finishedEntries = activeToday.filter((e) => e.status === "finalizado")
   const avgCompliance = Math.round(
-    (mockTimeEntries.filter((e) => e.effectiveHours >= 7.5).length /
-      Math.max(mockTimeEntries.filter((e) => e.status === "finalizado").length, 1)) *
+    (activeToday.filter((e) => e.effectiveHours >= 7.5).length /
+      Math.max(finishedEntries.length, 1)) *
     100
   )
 
-  // Weekly trend data
-  const weekDays = ["Lun", "Mar", "Mié", "Jue", "Vie"]
-  const weeklyTrend = weekDays.map((day, i) => {
-    const d = new Date()
-    d.setDate(d.getDate() - (4 - i))
-    const dateStr = d.toISOString().split("T")[0]
-    const entries = mockTimeEntries.filter((e) => e.date === dateStr)
-    const totalHours = entries.reduce((acc, e) => acc + e.effectiveHours, 0)
-    return { day, hours: Math.round(totalHours * 10) / 10 }
-  })
+  const weeklyTrend = kpiData.weeklyTrend
 
   const kpis = [
     {
@@ -101,7 +107,7 @@ export default function AdminDashboard() {
       value: activeProjects,
       numericValue: activeProjects,
       icon: FolderKanban,
-      detail: `${mockProjects.length} totales`,
+      detail: `${kpiData.totalProjects} totales`,
     },
     {
       label: "Cumplimiento",
