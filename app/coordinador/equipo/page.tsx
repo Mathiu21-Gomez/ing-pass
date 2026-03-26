@@ -24,9 +24,13 @@ import { useState, useCallback, useMemo } from "react"
 import type { Task, TaskStatus, Project, User } from "@/lib/types"
 
 const statusConfig: Record<TaskStatus, { label: string; color: string; bg: string }> = {
-    abierta: { label: "Abiertas", color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" },
-    pendiente_aprobacion: { label: "Pendientes", color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10 border-amber-500/20" },
-    cerrada: { label: "Cerradas", color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20" },
+    pendiente: { label: "Abiertas", color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" },
+    en_curso: { label: "En Curso", color: "text-blue-700 dark:text-blue-300", bg: "bg-blue-600/10 border-blue-600/20" },
+    esperando_info: { label: "Esperando Info", color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10 border-amber-500/20" },
+    bloqueado: { label: "Bloqueado", color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10 border-red-500/20" },
+    listo_para_revision: { label: "Para Revisión", color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10 border-amber-500/20" },
+    finalizado: { label: "Finalizadas", color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20" },
+    retrasado: { label: "Retrasado", color: "text-orange-600 dark:text-orange-400", bg: "bg-orange-500/10 border-orange-500/20" },
 }
 
 export default function CoordinadorEquipoPage() {
@@ -72,15 +76,15 @@ export default function CoordinadorEquipoPage() {
         return (
             <div className="rounded-lg border border-border bg-card p-3 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex items-start gap-2">
-                    {task.status === "cerrada" ? (
+                    {task.status === "finalizado" ? (
                         <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
-                    ) : task.status === "pendiente_aprobacion" ? (
+                    ) : task.status === "listo_para_revision" ? (
                         <AlertCircle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
                     ) : (
                         <Circle className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
                     )}
                     <div className="flex-1 min-w-0">
-                        <p className={cn("text-sm font-medium leading-tight", task.status === "cerrada" && "line-through text-muted-foreground")}>
+                        <p className={cn("text-sm font-medium leading-tight", task.status === "finalizado" && "line-through text-muted-foreground")}>
                             {task.name}
                         </p>
                         <p className="text-[10px] text-muted-foreground mt-0.5">{task._projectName}</p>
@@ -173,9 +177,9 @@ export default function CoordinadorEquipoPage() {
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                     {workers.map((worker) => {
                         const workerTasks = getTasksForWorker(worker.id)
-                        const openCount = workerTasks.filter((t) => t.status === "abierta").length
-                        const closedCount = workerTasks.filter((t) => t.status === "cerrada").length
-                        const pendingCount = workerTasks.filter((t) => t.status === "pendiente_aprobacion").length
+                        const openCount = workerTasks.filter((t) => t.status === "pendiente").length
+                        const closedCount = workerTasks.filter((t) => t.status === "finalizado").length
+                        const pendingCount = workerTasks.filter((t) => t.status === "listo_para_revision").length
 
                         return (
                             <Card key={worker.id}>
@@ -249,16 +253,16 @@ export default function CoordinadorEquipoPage() {
             {/* ─── View: By Status (Kanban columns) ─── */}
             {viewMode === "status" && (
                 <div className="grid gap-4 md:grid-cols-3">
-                    {(["abierta", "pendiente_aprobacion", "cerrada"] as TaskStatus[]).map((status) => {
+                    {(["pendiente", "listo_para_revision", "finalizado"] as TaskStatus[]).map((status) => {
                         const tasks = getTasksByStatus(status)
                         const cfg = statusConfig[status]
 
                         return (
                             <div key={status}>
                                 <div className={cn("flex items-center gap-2 rounded-lg border px-3 py-2 mb-3", cfg.bg)}>
-                                    {status === "cerrada" && <CheckCircle2 className={cn("h-4 w-4", cfg.color)} />}
-                                    {status === "abierta" && <Circle className={cn("h-4 w-4", cfg.color)} />}
-                                    {status === "pendiente_aprobacion" && <AlertCircle className={cn("h-4 w-4", cfg.color)} />}
+                                    {status === "finalizado" && <CheckCircle2 className={cn("h-4 w-4", cfg.color)} />}
+                                    {status === "pendiente" && <Circle className={cn("h-4 w-4", cfg.color)} />}
+                                    {status === "listo_para_revision" && <AlertCircle className={cn("h-4 w-4", cfg.color)} />}
                                     <span className={cn("text-sm font-medium", cfg.color)}>{cfg.label}</span>
                                     <Badge variant="secondary" className="ml-auto text-[10px] h-5 px-1.5">
                                         {tasks.length}

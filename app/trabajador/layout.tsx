@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/contexts/auth-context"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { WorkerHeader } from "@/components/worker-header"
+import { TimerAlerts } from "@/components/timer-alerts"
 
 export default function WorkerLayout({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated } = useAuth()
@@ -37,8 +38,9 @@ export default function WorkerLayout({ children }: { children: React.ReactNode }
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="bg-surface-worker min-h-screen">
       <WorkerHeader />
+      <TimerAlerts />
       <main className="mx-auto max-w-7xl p-4 lg:p-6">{children}</main>
     </div>
   )

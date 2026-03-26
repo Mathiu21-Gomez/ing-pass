@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/db"
-import { user, userSchedules } from "@/db/schema"
-import { userSchema } from "@/lib/schemas"
-import { eq, and } from "drizzle-orm"
+import { user as userTable, userSchedules } from "@/db/schema"
+import { createUserSchema } from "@/lib/schemas"
+import { eq } from "drizzle-orm"
+import { getAuthUser, requireRole } from "@/lib/api-auth"
+import { auth } from "@/lib/auth"
 
 // Default weekly schedule (Mon-Fri 08:00-17:00)
 function defaultSchedule(userId: string) {
@@ -17,15 +19,21 @@ function defaultSchedule(userId: string) {
 }
 
 export async function GET(request: NextRequest) {
+  const { user, error } = await getAuthUser(request)
+  if (error) return error
+
+  const roleError = requireRole(user, ['admin', 'coordinador'])
+  if (roleError) return roleError
+
   try {
     const { searchParams } = new URL(request.url)
     const role = searchParams.get("role")
     const active = searchParams.get("active")
 
-    let query = db.select().from(user)
+    let query = db.select().from(userTable)
 
     if (role) {
-      query = query.where(eq(user.role, role as "admin" | "coordinador" | "trabajador" | "externo")) as typeof query
+      query = query.where(eq(userTable.role, role as "admin" | "coordinador" | "trabajador" | "externo")) as typeof query
     }
 
     const allUsers = await query
@@ -68,11 +76,17 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const { user, error } = await getAuthUser(request)
+  if (error) return error
+
+  const roleError = requireRole(user, ['admin'])
+  if (roleError) return roleError
+
   try {
     const body = await request.json()
     const { weeklySchedule: scheduleData, ...userData } = body
 
-    const parsed = userSchema.safeParse(userData)
+    const parsed = createUserSchema.safeParse(userData)
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Datos inválidos", details: parsed.error.flatten() },
@@ -80,18 +94,32 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const userId = crypto.randomUUID()
+    const { password, ...userFields } = parsed.data
 
-    const [newUser] = await db
-      .insert(user)
-      .values({
-        id: userId,
-        ...parsed.data,
-        emailPersonal: parsed.data.emailPersonal || "",
-      })
-      .returning()
+    const created = await auth.api.createUser({
+      body: {
+        email: userFields.email,
+        password,
+        name: userFields.name,
+        data: {
+          role: userFields.role,
+          position: userFields.position,
+          emailPersonal: userFields.emailPersonal || "",
+          scheduleType: userFields.scheduleType,
+          active: userFields.active,
+        },
+      },
+    })
 
-    // Insert schedule rows
+    if (!created?.user) {
+      return NextResponse.json(
+        { error: "Error al crear usuario en el sistema de autenticación" },
+        { status: 500 }
+      )
+    }
+
+    const userId = created.user.id
+
     const schedulesToInsert = scheduleData?.length
       ? scheduleData.map((s: { dayOfWeek: number; startTime: string; endTime: string; isWorkingDay: boolean; reason?: string }) => ({
         userId,
@@ -105,7 +133,6 @@ export async function POST(request: NextRequest) {
 
     await db.insert(userSchedules).values(schedulesToInsert)
 
-    // Fetch back the created schedules
     const createdSchedules = await db
       .select()
       .from(userSchedules)
@@ -113,7 +140,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       {
-        ...newUser,
+        ...created.user,
         weeklySchedule: createdSchedules
           .sort((a, b) => a.dayOfWeek - b.dayOfWeek)
           .map((s) => ({

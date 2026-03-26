@@ -2,12 +2,23 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/db"
 import { timeEntries } from "@/db/schema"
 import { eq } from "drizzle-orm"
+import { getAuthUser, requireRole } from "@/lib/api-auth"
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user: authUser, error } = await getAuthUser(request)
+  if (error) return error
+
   try {
+    if (authUser.role === "externo") {
+      return NextResponse.json(
+        { error: "Sin permisos suficientes" },
+        { status: 403 }
+      )
+    }
+
     const { id } = await params
     const entry = await db
       .select()
@@ -18,6 +29,13 @@ export async function GET(
       return NextResponse.json(
         { error: "Registro no encontrado" },
         { status: 404 }
+      )
+    }
+
+    if (authUser.role === "trabajador" && entry[0].userId !== authUser.id) {
+      return NextResponse.json(
+        { error: "Sin permisos para ver este registro" },
+        { status: 403 }
       )
     }
 
@@ -35,7 +53,17 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user: authUser, error: authError } = await getAuthUser(request)
+  if (authError) return authError
+
   try {
+    if (authUser.role === "externo") {
+      return NextResponse.json(
+        { error: "Sin permisos suficientes" },
+        { status: 403 }
+      )
+    }
+
     const { id } = await params
     const body = await request.json()
 
@@ -48,6 +76,13 @@ export async function PATCH(
       return NextResponse.json(
         { error: "Registro no encontrado" },
         { status: 404 }
+      )
+    }
+
+    if (authUser.role === "trabajador" && existing[0].userId !== authUser.id) {
+      return NextResponse.json(
+        { error: "Sin permisos para editar este registro" },
+        { status: 403 }
       )
     }
 
@@ -71,7 +106,6 @@ export async function PATCH(
         ...(body.progressPercentage !== undefined && { progressPercentage: body.progressPercentage }),
         ...(body.pauseCount !== undefined && { pauseCount: body.pauseCount }),
         ...(body.progressJustification !== undefined && { progressJustification: body.progressJustification }),
-        ...(body.editable !== undefined && { editable: body.editable }),
       })
       .where(eq(timeEntries.id, id))
       .returning()
@@ -87,9 +121,15 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user: authUser, error: authError } = await getAuthUser(request)
+  if (authError) return authError
+
+  const roleError = requireRole(authUser, ['admin', 'coordinador'])
+  if (roleError) return roleError
+
   try {
     const { id } = await params
     const deleted = await db

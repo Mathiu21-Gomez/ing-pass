@@ -1,12 +1,8 @@
-import { Loader2 } from "lucide-react"
-
+import { TableSkeleton } from "@/components/skeletons"
 export default function Loading() {
-    return (
-        <div className="flex items-center justify-center min-h-[400px]">
-            <div className="flex flex-col items-center gap-3">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                <p className="text-sm text-muted-foreground">Cargando...</p>
-            </div>
-        </div>
-    )
+  return (
+    <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+      <TableSkeleton rows={8} />
+    </div>
+  )
 }

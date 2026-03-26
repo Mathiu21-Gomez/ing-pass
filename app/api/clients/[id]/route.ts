@@ -2,14 +2,38 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/db"
 import { clients } from "@/db/schema"
 import { clientSchema } from "@/lib/schemas"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
+import { getAuthUser, requireRole } from "@/lib/api-auth"
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user: authUser, error } = await getAuthUser(request)
+  if (error) return error
+
   try {
     const { id } = await params
+
+    if (authUser.role === "externo") {
+      const client = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, id), eq(clients.email, authUser.email)))
+
+      if (client.length === 0) {
+        return NextResponse.json(
+          { error: "Cliente no encontrado" },
+          { status: 404 }
+        )
+      }
+
+      return NextResponse.json(client[0])
+    }
+
+    const roleError = requireRole(authUser, ["admin", "coordinador"])
+    if (roleError) return roleError
+
     const client = await db.select().from(clients).where(eq(clients.id, id))
 
     if (client.length === 0) {
@@ -33,6 +57,12 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user: authUser, error: authError } = await getAuthUser(request)
+  if (authError) return authError
+
+  const roleError = requireRole(authUser, ["admin"])
+  if (roleError) return roleError
+
   try {
     const { id } = await params
     const body = await request.json()
@@ -69,9 +99,15 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user: authUser, error: authError } = await getAuthUser(request)
+  if (authError) return authError
+
+  const roleError = requireRole(authUser, ["admin"])
+  if (roleError) return roleError
+
   try {
     const { id } = await params
     const deleted = await db

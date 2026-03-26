@@ -11,8 +11,28 @@ import {
   index,
   uuid,
   primaryKey,
+  json,
+  uniqueIndex,
 } from "drizzle-orm/pg-core"
 import { relations } from "drizzle-orm"
+
+// ── Attachment type for notes ──
+export interface NoteAttachment {
+  id: string
+  name: string
+  type: string   // MIME type
+  size: number   // bytes
+  data: string   // base64
+}
+
+// ── Attachment type for comments ──
+export interface CommentAttachment {
+  id: string
+  name: string
+  type: string   // MIME type
+  size: number   // bytes
+  data: string   // base64
+}
 
 // ── Enums ──
 
@@ -32,9 +52,13 @@ export const timerStatusEnum = pgEnum("timer_status", [
 ])
 
 export const taskStatusEnum = pgEnum("task_status", [
-  "abierta",
-  "cerrada",
-  "pendiente_aprobacion",
+  "pendiente",
+  "en_curso",
+  "esperando_info",
+  "bloqueado",
+  "listo_para_revision",
+  "finalizado",
+  "retrasado",
 ])
 
 export const workerStatusEnum = pgEnum("worker_status", [
@@ -188,20 +212,32 @@ export const projectUrls = pgTable("project_urls", {
   url: text("url").notNull(),
 })
 
-export const tasks = pgTable("tasks", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  name: varchar("name", { length: 100 }).notNull(),
-  description: text("description").notNull(),
-  projectId: uuid("project_id")
-    .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
-  createdBy: text("created_by")
-    .notNull()
-    .references(() => user.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  dueDate: date("due_date"),
-  status: taskStatusEnum("status").notNull().default("abierta"),
-})
+export const tasks = pgTable(
+  "tasks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    correlativeId: integer("correlative_id").notNull().default(0),
+    name: varchar("name", { length: 200 }).notNull(),
+    description: text("description").notNull().default(""),
+    guidelines: text("guidelines").default(""),
+    priority: integer("priority").notNull().default(0),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    dueDate: date("due_date"),
+    status: taskStatusEnum("status").notNull().default("pendiente"),
+  },
+  (table) => [
+    uniqueIndex("tasks_project_correlative_unique").on(
+      table.projectId,
+      table.correlativeId
+    ),
+  ]
+)
 
 export const taskAssignments = pgTable(
   "task_assignments",
@@ -221,9 +257,10 @@ export const activities = pgTable("activities", {
   taskId: uuid("task_id")
     .notNull()
     .references(() => tasks.id, { onDelete: "cascade" }),
-  name: varchar("name", { length: 100 }).notNull(),
-  description: text("description").notNull(),
+  name: varchar("name", { length: 200 }).notNull(),
+  description: text("description").notNull().default(""),
   completed: boolean("completed").notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
   dueDate: date("due_date"),
   createdBy: text("created_by")
     .notNull()
@@ -239,7 +276,9 @@ export const comments = pgTable("comments", {
     .notNull()
     .references(() => user.id),
   text: text("text").notNull(),
+  mentions: text("mentions").array().default([]),
   referenceId: text("reference_id"),
+  attachments: json("attachments").$type<CommentAttachment[]>().default([]),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 })
 
@@ -294,6 +333,138 @@ export const userSchedules = pgTable(
     reason: text("reason").default(""), // Justificación para Sáb/Dom
   },
   (table) => [primaryKey({ columns: [table.userId, table.dayOfWeek] })],
+)
+
+// ── Tags (etiquetas para tareas) ──
+export const tags = pgTable("tags", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 50 }).notNull(),
+  color: varchar("color", { length: 20 }).notNull().default("#6366f1"),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  createdBy: text("created_by")
+    .notNull()
+    .references(() => user.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
+export const taskTags = pgTable(
+  "task_tags",
+  {
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    tagId: uuid("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.taskId, table.tagId] })]
+)
+
+export const taskAlerts = pgTable("task_alerts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  taskId: uuid("task_id")
+    .notNull()
+    .references(() => tasks.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  alertAt: timestamp("alert_at").notNull(),
+  message: text("message").default(""),
+  dismissed: boolean("dismissed").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
+// ── Notes (notas del equipo) ──
+export const noteCategoryEnum = pgEnum("note_category", [
+  "trabajo_ayer",
+  "emergencia",
+  "anotacion",
+  "cumpleanos",
+  "general",
+])
+
+export const notes = pgTable("notes", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  title: varchar("title", { length: 200 }).notNull(),
+  content: text("content").default(""),
+  authorId: text("author_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  category: noteCategoryEnum("category").notNull().default("general"),
+  isTeamNote: boolean("is_team_note").notNull().default(false),
+  priority: text("priority"),  // "alta" | "media" | "baja" | null
+  targetRoles: text("target_roles").array().default([]),
+  attachments: json("attachments").$type<NoteAttachment[]>().default([]),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .$onUpdate(() => new Date())
+    .notNull(),
+})
+
+// ── Events (comunicados y eventos de empresa) ──
+export const events = pgTable("events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  title: varchar("title", { length: 200 }).notNull(),
+  content: text("content").default(""),
+  type: varchar("type", { length: 20 }).notNull().default("comunicado"), // "evento" | "comunicado"
+  eventDate: date("event_date"),
+  createdBy: text("created_by")
+    .notNull()
+    .references(() => user.id),
+  targetRoles: text("target_roles").array().default([]), // vacío = todos los roles
+  pinned: boolean("pinned").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
+// ══════════════════════════════════════════════════════════════
+//  Permission system tables
+// ══════════════════════════════════════════════════════════════
+
+export const roles = pgTable("roles", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 50 }).notNull().unique(),
+  description: text("description").default(""),
+  isSystem: boolean("is_system").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
+export const permissions = pgTable(
+  "permissions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    module: varchar("module", { length: 50 }).notNull(),
+    action: varchar("action", { length: 20 }).notNull(),
+    description: text("description").default(""),
+  },
+  (table) => [index("permissions_module_action_idx").on(table.module, table.action)]
+)
+
+export const rolePermissions = pgTable(
+  "role_permissions",
+  {
+    roleId: uuid("role_id")
+      .notNull()
+      .references(() => roles.id, { onDelete: "cascade" }),
+    permissionId: uuid("permission_id")
+      .notNull()
+      .references(() => permissions.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.roleId, table.permissionId] })]
+)
+
+export const userRoles = pgTable(
+  "user_roles",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    roleId: uuid("role_id")
+      .notNull()
+      .references(() => roles.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.roleId] })]
 )
 
 // ══════════════════════════════════════════════════════════════
@@ -443,6 +614,104 @@ export const timeEntriesRelations = relations(timeEntries, ({ one }) => ({
   }),
   task: one(tasks, {
     fields: [timeEntries.taskId],
+    references: [tasks.id],
+  }),
+}))
+
+export const tagsRelations = relations(tags, ({ one, many }) => ({
+  project: one(projects, { fields: [tags.projectId], references: [projects.id] }),
+  creator: one(user, { fields: [tags.createdBy], references: [user.id] }),
+  taskTags: many(taskTags),
+}))
+
+export const taskTagsRelations = relations(taskTags, ({ one }) => ({
+  task: one(tasks, { fields: [taskTags.taskId], references: [tasks.id] }),
+  tag: one(tags, { fields: [taskTags.tagId], references: [tags.id] }),
+}))
+
+export const taskAlertsRelations = relations(taskAlerts, ({ one }) => ({
+  task: one(tasks, { fields: [taskAlerts.taskId], references: [tasks.id] }),
+  user: one(user, { fields: [taskAlerts.userId], references: [user.id] }),
+}))
+
+export const rolesRelations = relations(roles, ({ many }) => ({
+  rolePermissions: many(rolePermissions),
+  userRoles: many(userRoles),
+}))
+
+export const permissionsRelations = relations(permissions, ({ many }) => ({
+  rolePermissions: many(rolePermissions),
+}))
+
+export const rolePermissionsRelations = relations(rolePermissions, ({ one }) => ({
+  role: one(roles, {
+    fields: [rolePermissions.roleId],
+    references: [roles.id],
+  }),
+  permission: one(permissions, {
+    fields: [rolePermissions.permissionId],
+    references: [permissions.id],
+  }),
+}))
+
+export const userRolesRelations = relations(userRoles, ({ one }) => ({
+  user: one(user, {
+    fields: [userRoles.userId],
+    references: [user.id],
+  }),
+  role: one(roles, {
+    fields: [userRoles.roleId],
+    references: [roles.id],
+  }),
+}))
+
+export const eventsRelations = relations(events, ({ one }) => ({
+  creator: one(user, {
+    fields: [events.createdBy],
+    references: [user.id],
+  }),
+}))
+
+export const notesRelations = relations(notes, ({ one }) => ({
+  author: one(user, {
+    fields: [notes.authorId],
+    references: [user.id],
+  }),
+  project: one(projects, {
+    fields: [notes.projectId],
+    references: [projects.id],
+  }),
+}))
+
+// ── Messages (chat jornada + mensajes de clientes externos) ──
+export const messages = pgTable("messages", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  fromUserId: text("from_user_id")
+    .notNull()
+    .references(() => user.id),
+  content: text("content").notNull(),
+  // sessionId groups messages from the same jornada (generated UUID at startDay, no FK)
+  sessionId: text("session_id"),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+  taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
+  isClientMessage: boolean("is_client_message").notNull().default(false),
+  isPreStart: boolean("is_pre_start").notNull().default(false),
+  attachments: json("attachments").$type<CommentAttachment[]>().default([]),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
+export const messagesRelations = relations(messages, ({ one }) => ({
+  from: one(user, {
+    fields: [messages.fromUserId],
+    references: [user.id],
+  }),
+  project: one(projects, {
+    fields: [messages.projectId],
+    references: [projects.id],
+  }),
+  task: one(tasks, {
+    fields: [messages.taskId],
     references: [tasks.id],
   }),
 }))

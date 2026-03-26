@@ -11,6 +11,7 @@ import {
 } from "react"
 import type { TimerStatus, HourlyProgress, TimeEntry } from "@/lib/types"
 import { timeEntriesApi } from "@/lib/services/api"
+import { useAuth } from "@/lib/contexts/auth-context"
 
 interface TimerState {
   status: TimerStatus
@@ -43,10 +44,12 @@ interface TimerState {
   progressNotes: { percentage: number; note: string; timestamp: Date }[]
   // Persisted entries from current session
   sessionEntries: TimeEntry[]
+  // Chat session ID — generated at startDay, groups messages for this jornada
+  activeSessionId: string | null
 }
 
 interface TimerContextType extends TimerState {
-  startDay: (projectId: string, taskId: string, userId?: string) => void
+  startDay: (projectId: string, taskId: string, userId?: string, sessionId?: string) => string
   startLunch: () => void
   endLunch: () => void
   pauseWork: () => void
@@ -80,38 +83,40 @@ const FOUR_HOURS = 4 * 60 * 60
 const SEVEN_HOURS_55 = 7 * 60 * 60 + 55 * 60
 const EIGHT_HOURS = 8 * 60 * 60
 
+const INITIAL_TIMER_STATE: TimerState = {
+  status: "inactivo",
+  elapsedWorkSeconds: 0,
+  elapsedLunchSeconds: 0,
+  elapsedPauseSeconds: 0,
+  elapsedMeetingSeconds: 0,
+  startTime: null,
+  lunchStartTime: null,
+  lunchEndTime: null,
+  pauseStartTime: null,
+  meetingStartTime: null,
+  userId: null,
+  currentProjectId: null,
+  currentTaskId: null,
+  showLunchAlert: false,
+  showEndWarning: false,
+  showDaySummary: false,
+  showSwitchTaskDialog: false,
+  showAutoEndDialog: false,
+  isExtraTime: false,
+  hourlyProgress: [],
+  showProgressPrompt: false,
+  pendingHourMilestone: null,
+  manualProgressPercentage: 0,
+  pauseCount: 0,
+  meetingCount: 0,
+  progressNotes: [],
+  sessionEntries: [],
+  activeSessionId: null,
+}
+
 export function TimerProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<TimerState>({
-    status: "inactivo",
-    elapsedWorkSeconds: 0,
-    elapsedLunchSeconds: 0,
-    elapsedPauseSeconds: 0,
-    elapsedMeetingSeconds: 0,
-    startTime: null,
-    lunchStartTime: null,
-    lunchEndTime: null,
-    pauseStartTime: null,
-    meetingStartTime: null,
-    userId: null,
-    currentProjectId: null,
-    currentTaskId: null,
-    showLunchAlert: false,
-    showEndWarning: false,
-    showDaySummary: false,
-    showSwitchTaskDialog: false,
-    showAutoEndDialog: false,
-    isExtraTime: false,
-    // Hourly progress tracking
-    hourlyProgress: [],
-    showProgressPrompt: false,
-    pendingHourMilestone: null,
-    // Manual progress tracking
-    manualProgressPercentage: 0,
-    pauseCount: 0,
-    meetingCount: 0,
-    progressNotes: [],
-    sessionEntries: [],
-  })
+  const { user } = useAuth()
+  const [state, setState] = useState<TimerState>(INITIAL_TIMER_STATE)
 
   const [scheduleEndTime, setScheduleEndTime] = useState<string | null>(null)
   const stateRef = useRef<TimerState>(state)
@@ -126,6 +131,32 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   const workStartTimestamp = useRef<number | null>(null)
   const totalPausedMs = useRef<number>(0)
   const totalLunchMs = useRef<number>(0)
+
+  // Reset timer when authenticated user changes (e.g. logout → login as different user)
+  const prevUserIdRef = useRef<string | null | undefined>(undefined)
+  useEffect(() => {
+    // Skip the very first render (undefined → first value)
+    if (prevUserIdRef.current === undefined) {
+      prevUserIdRef.current = user?.id ?? null
+      return
+    }
+    const incoming = user?.id ?? null
+    if (prevUserIdRef.current !== incoming) {
+      prevUserIdRef.current = incoming
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+      workStartTimestamp.current = null
+      totalPausedMs.current = 0
+      totalLunchMs.current = 0
+      lunchAlertShown.current = false
+      endWarningShown.current = false
+      autoEndShown.current = false
+      hourMilestonesShown.current = new Set()
+      setState(INITIAL_TIMER_STATE)
+    }
+  }, [user?.id])
 
   // Timestamp-based tick for accuracy
   const tick = useCallback(() => {
@@ -192,7 +223,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   }, [tick])
 
   const startDay = useCallback(
-    (projectId: string, taskId: string, userId?: string) => {
+    (projectId: string, taskId: string, userId?: string, existingSessionId?: string): string => {
       lunchAlertShown.current = false
       endWarningShown.current = false
       autoEndShown.current = false
@@ -200,6 +231,8 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       workStartTimestamp.current = Date.now()
       totalPausedMs.current = 0
       totalLunchMs.current = 0
+
+      const sessionId = existingSessionId ?? crypto.randomUUID()
 
       setState({
         status: "trabajando",
@@ -229,8 +262,10 @@ export function TimerProvider({ children }: { children: ReactNode }) {
         meetingCount: 0,
         progressNotes: [],
         sessionEntries: [],
+        activeSessionId: sessionId,
       })
       startInterval()
+      return sessionId
     },
     [startInterval]
   )

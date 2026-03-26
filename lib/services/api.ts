@@ -1,4 +1,4 @@
-import type { Client, User, Project, Task, TimeEntry, TimeEntryEnriched, Comment, Activity, DashboardKPIs } from "@/lib/types"
+import type { Client, User, Project, Task, TimeEntry, TimeEntryEnriched, Comment, Activity, DashboardKPIs, CommentAttachment } from "@/lib/types"
 
 // ── Generic fetcher ──
 async function fetcher<T>(url: string): Promise<T> {
@@ -92,10 +92,10 @@ export const tasksApi = {
     createActivity: (taskId: string, data: { name: string; description: string; dueDate?: string; createdBy: string }) =>
         poster<Activity>(`/api/tasks/${taskId}/activities`, data),
     toggleActivity: (taskId: string, activityId: string, completed: boolean) =>
-        patcher<Activity>(`/api/tasks/${taskId}/activities`, { activityId, completed }),
+        patcher<Activity & { taskStatusChanged: boolean; newTaskStatus: string | null }>(`/api/tasks/${taskId}/activities`, { activityId, completed }),
     getComments: (taskId: string) =>
         fetcher<Comment[]>(`/api/tasks/${taskId}/comments`),
-    createComment: (taskId: string, data: { text: string; authorId: string; parentType?: string; referenceId?: string }) =>
+    createComment: (taskId: string, data: { text: string; authorId: string; parentType?: string; referenceId?: string; attachments?: CommentAttachment[] }) =>
         poster<Comment>(`/api/tasks/${taskId}/comments`, data),
 }
 
@@ -112,6 +112,15 @@ export const timeEntriesApi = {
         poster<TimeEntry>("/api/time-entries", data),
     update: (id: string, data: Partial<TimeEntry>) =>
         patcher<TimeEntry>(`/api/time-entries/${id}`, data),
+}
+
+// ══════════════════════════════════════════════
+// Messages
+// ══════════════════════════════════════════════
+
+export const messagesApi = {
+    getByTask: (taskId: string) => fetcher<{ id: string; fromUserId: string; fromUserName: string; fromUserRole: string; content: string; taskId: string | null; createdAt: string }[]>(`/api/messages?taskId=${taskId}`),
+    getBySession: (sessionId: string) => fetcher<{ id: string; fromUserId: string; fromUserName: string; fromUserRole: string; content: string; sessionId: string | null; createdAt: string }[]>(`/api/messages?sessionId=${sessionId}`),
 }
 
 // ══════════════════════════════════════════════

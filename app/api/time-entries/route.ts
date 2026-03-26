@@ -1,59 +1,68 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/db"
 import { timeEntries, user, projects, tasks } from "@/db/schema"
-import { eq, desc } from "drizzle-orm"
+import { eq, desc, and } from "drizzle-orm"
+import { getAuthUser } from "@/lib/api-auth"
 
 export async function GET(request: NextRequest) {
+  const { user: authUser, error } = await getAuthUser(request)
+  if (error) return error
+
   try {
     const { searchParams } = new URL(request.url)
-    const userId = searchParams.get("userId")
+    let userId = searchParams.get("userId")
+
+    if (authUser.role === 'trabajador') {
+      userId = authUser.id
+    }
     const projectId = searchParams.get("projectId")
     const date = searchParams.get("date")
     const status = searchParams.get("status")
 
-    let query = db.select().from(timeEntries).orderBy(desc(timeEntries.date))
-
-    if (userId) {
-      query = query.where(eq(timeEntries.userId, userId)) as typeof query
-    }
-    if (projectId) {
-      query = query.where(eq(timeEntries.projectId, projectId)) as typeof query
-    }
-    if (date) {
-      query = query.where(eq(timeEntries.date, date)) as typeof query
-    }
-    if (status) {
-      query = query.where(eq(timeEntries.status, status as "trabajando" | "colacion" | "pausado" | "finalizado" | "inactivo")) as typeof query
-    }
-
-    const entries = await query
-
-    const enriched = await Promise.all(
-      entries.map(async (entry) => {
-        const userResult = await db
-          .select({ name: user.name, position: user.position })
-          .from(user)
-          .where(eq(user.id, entry.userId))
-
-        const project = await db
-          .select({ name: projects.name })
-          .from(projects)
-          .where(eq(projects.id, entry.projectId))
-
-        const task = await db
-          .select({ name: tasks.name })
-          .from(tasks)
-          .where(eq(tasks.id, entry.taskId))
-
-        return {
-          ...entry,
-          userName: userResult[0]?.name ?? "",
-          userPosition: userResult[0]?.position ?? "",
-          projectName: project[0]?.name ?? "",
-          taskName: task[0]?.name ?? "",
-        }
+    const rows = await db
+      .select({
+        id: timeEntries.id,
+        userId: timeEntries.userId,
+        projectId: timeEntries.projectId,
+        taskId: timeEntries.taskId,
+        date: timeEntries.date,
+        startTime: timeEntries.startTime,
+        lunchStartTime: timeEntries.lunchStartTime,
+        lunchEndTime: timeEntries.lunchEndTime,
+        endTime: timeEntries.endTime,
+        effectiveHours: timeEntries.effectiveHours,
+        status: timeEntries.status,
+        notes: timeEntries.notes,
+        progressPercentage: timeEntries.progressPercentage,
+        pauseCount: timeEntries.pauseCount,
+        progressJustification: timeEntries.progressJustification,
+        editable: timeEntries.editable,
+        userName: user.name,
+        userPosition: user.position,
+        projectName: projects.name,
+        taskName: tasks.name,
       })
-    )
+      .from(timeEntries)
+      .leftJoin(user, eq(timeEntries.userId, user.id))
+      .leftJoin(projects, eq(timeEntries.projectId, projects.id))
+      .leftJoin(tasks, eq(timeEntries.taskId, tasks.id))
+      .where(
+        and(
+          userId ? eq(timeEntries.userId, userId) : undefined,
+          projectId ? eq(timeEntries.projectId, projectId) : undefined,
+          date ? eq(timeEntries.date, date) : undefined,
+          status ? eq(timeEntries.status, status as "trabajando" | "colacion" | "pausado" | "finalizado" | "inactivo") : undefined,
+        )
+      )
+      .orderBy(desc(timeEntries.date))
+
+    const enriched = rows.map((r) => ({
+      ...r,
+      userName: r.userName ?? "",
+      userPosition: r.userPosition ?? "",
+      projectName: r.projectName ?? "",
+      taskName: r.taskName ?? "",
+    }))
 
     return NextResponse.json(enriched)
   } catch (error) {
@@ -66,11 +75,13 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const { user: authUser, error } = await getAuthUser(request)
+  if (error) return error
+
   try {
     const body = await request.json()
 
     const {
-      userId,
       projectId,
       taskId,
       date,
@@ -86,9 +97,9 @@ export async function POST(request: NextRequest) {
       progressJustification,
     } = body
 
-    if (!userId || !projectId || !taskId || !date || !startTime) {
+    if (!projectId || !taskId || !date || !startTime) {
       return NextResponse.json(
-        { error: "Campos requeridos: userId, projectId, taskId, date, startTime" },
+        { error: "Campos requeridos: projectId, taskId, date, startTime" },
         { status: 400 }
       )
     }
@@ -96,7 +107,7 @@ export async function POST(request: NextRequest) {
     const [newEntry] = await db
       .insert(timeEntries)
       .values({
-        userId,
+        userId: authUser.id,
         projectId,
         taskId,
         date,

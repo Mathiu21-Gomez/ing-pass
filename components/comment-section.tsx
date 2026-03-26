@@ -10,11 +10,11 @@ import { usersApi } from "@/lib/services/api"
 import { useApiData } from "@/hooks/use-api-data"
 import { MessageSquare, Send, Hash } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { Comment, ImageAttachment, User } from "@/lib/types"
+import type { Comment, CommentAttachment, User } from "@/lib/types"
 
 interface CommentSectionProps {
     comments: Comment[]
-    onAddComment: (comment: Comment) => void
+    onAddComment: (text: string, attachments: CommentAttachment[], referenceId?: string) => void
     currentUserId: string
     className?: string
 }
@@ -22,28 +22,14 @@ interface CommentSectionProps {
 export function CommentSection({ comments, onAddComment, currentUserId, className }: CommentSectionProps) {
     const [text, setText] = useState("")
     const [referenceId, setReferenceId] = useState("")
-    const [images, setImages] = useState<ImageAttachment[]>([])
+    const [images, setImages] = useState<CommentAttachment[]>([])
     const [showRefField, setShowRefField] = useState(false)
     const fetchUsers = useCallback(() => usersApi.getAll(), [])
     const { data: allUsers } = useApiData(fetchUsers, [] as User[])
 
     function handleSubmit() {
         if (!text.trim()) return
-
-        const newComment: Comment = {
-            id: `com_${Date.now()}`,
-            parentType: "task",
-            parentId: "",  // se llena en el componente padre
-            authorId: currentUserId,
-            text: text.trim(),
-            createdAt: new Date().toISOString(),
-            imageAttachments: images.length > 0
-                ? images.map((img) => ({ ...img, uploadedBy: currentUserId }))
-                : undefined,
-            referenceId: referenceId.trim() || undefined,
-        }
-
-        onAddComment(newComment)
+        onAddComment(text.trim(), images, referenceId.trim() || undefined)
         setText("")
         setReferenceId("")
         setImages([])
@@ -104,16 +90,22 @@ export function CommentSection({ comments, onAddComment, currentUserId, classNam
 
                                     <p className="text-sm text-foreground/90 whitespace-pre-wrap break-words">{comment.text}</p>
 
-                                    {comment.imageAttachments && comment.imageAttachments.length > 0 && (
+                                    {comment.attachments && comment.attachments.length > 0 && (
                                         <div className="flex flex-wrap gap-1.5 mt-2">
-                                            {comment.imageAttachments.map((img) => (
-                                                <div key={img.id} className="rounded-md overflow-hidden border border-border w-24 h-24 cursor-pointer hover:opacity-80 transition-opacity">
+                                            {comment.attachments.map((img) => (
+                                                <a
+                                                    key={img.id}
+                                                    href={`data:${img.type};base64,${img.data}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="rounded-md overflow-hidden border border-border w-24 h-24 block hover:opacity-80 transition-opacity"
+                                                >
                                                     <img
-                                                        src={img.url}
+                                                        src={`data:${img.type};base64,${img.data}`}
                                                         alt={img.name}
                                                         className="w-full h-full object-cover"
                                                     />
-                                                </div>
+                                                </a>
                                             ))}
                                         </div>
                                     )}

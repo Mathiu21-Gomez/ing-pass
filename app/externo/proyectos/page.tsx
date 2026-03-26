@@ -29,12 +29,14 @@ import {
     Plus,
     AlertCircle,
     Hash,
+    MessageSquare,
 } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ChatPanel } from "@/components/chat-panel"
 import { cn } from "@/lib/utils"
 import { useState, useCallback, useMemo } from "react"
-import type { Task, Comment } from "@/lib/types"
+import type { Task } from "@/lib/types"
 import { toast } from "sonner"
-import { CommentSection } from "@/components/comment-section"
 
 const statusConfig: Record<string, { className: string }> = {
     Activo: { className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" },
@@ -43,9 +45,9 @@ const statusConfig: Record<string, { className: string }> = {
 }
 
 const taskStatusConfig: Record<string, { label: string; className: string }> = {
-    abierta: { label: "Abierta", className: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20" },
-    cerrada: { label: "Cerrada", className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" },
-    pendiente_aprobacion: { label: "Pendiente aprobación", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20" },
+    pendiente: { label: "Abierta", className: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20" },
+    finalizado: { label: "Cerrada", className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" },
+    listo_para_revision: { label: "Pendiente aprobación", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20" },
 }
 
 export default function ExternoProyectosPage() {
@@ -61,7 +63,6 @@ export default function ExternoProyectosPage() {
     const [localProjects, setLocalProjects] = useState<Project[]>([])
     const [selectedTask, setSelectedTask] = useState<Task | null>(null)
     const [selectedProjectName, setSelectedProjectName] = useState("")
-    const [localComments, setLocalComments] = useState<Comment[]>([])
 
     // Sync from API when data arrives
     useMemo(() => {
@@ -106,12 +107,12 @@ export default function ExternoProyectosPage() {
                 createdBy: user.id,
             })
 
-            // API creates with "abierta" by default — update to "pendiente_aprobacion"
-            const updated = await tasksApi.update(created.id, { status: "pendiente_aprobacion" })
+            // API creates with "pendiente" by default — update to "listo_para_revision"
+            const updated = await tasksApi.update(created.id, { status: "listo_para_revision" })
 
             const newTask: Task = {
                 ...created,
-                status: updated.status ?? "pendiente_aprobacion",
+                status: updated.status ?? "listo_para_revision",
                 documents: [],
                 activities: [],
             }
@@ -123,16 +124,6 @@ export default function ExternoProyectosPage() {
                         : p
                 )
             )
-
-            if (newTaskForm.referenceId.trim()) {
-                const refComment = await tasksApi.createComment(created.id, {
-                    text: `Tarea creada con referencia a documento externo: ${newTaskForm.referenceId.trim()}`,
-                    authorId: user.id,
-                    parentType: "task",
-                    referenceId: newTaskForm.referenceId.trim(),
-                })
-                setLocalComments((prev) => [...prev, refComment])
-            }
 
             toast.success("Tarea enviada para aprobación del coordinador")
             setShowCreateDialog(false)
@@ -146,26 +137,6 @@ export default function ExternoProyectosPage() {
     function openCreateFor(projectId: string) {
         setCreateProjectId(projectId)
         setShowCreateDialog(true)
-    }
-
-    async function handleAddComment(comment: Comment) {
-        if (!selectedTask) return
-        try {
-            const created = await tasksApi.createComment(selectedTask.id, {
-                text: comment.text,
-                authorId: comment.authorId,
-                parentType: "task",
-            })
-            setLocalComments((prev) => [...prev, created])
-            toast.success("Comentario agregado")
-        } catch {
-            toast.error("Error al agregar comentario")
-        }
-    }
-
-    // Get comments for a task
-    function getTaskComments(taskId: string) {
-        return localComments.filter((c) => c.parentType === "task" && c.parentId === taskId)
     }
 
     return (
@@ -191,8 +162,8 @@ export default function ExternoProyectosPage() {
                     {clientProjects.map((project) => {
                         const coordinator = allUsers.find((u) => u.id === project.coordinatorId)
                         const projectProgress = calcProjectProgress(project.tasks)
-                        const closedTasks = project.tasks.filter((t) => t.status === "cerrada").length
-                        const pendingTasks = project.tasks.filter((t) => t.status === "pendiente_aprobacion").length
+                        const closedTasks = project.tasks.filter((t) => t.status === "finalizado").length
+                        const pendingTasks = project.tasks.filter((t) => t.status === "listo_para_revision").length
 
                         return (
                             <Card key={project.id} className="card-hover">
@@ -207,7 +178,21 @@ export default function ExternoProyectosPage() {
                                         </Badge>
                                     </div>
                                 </CardHeader>
-                                <CardContent className="flex flex-col gap-4">
+                                <CardContent className="flex flex-col gap-0 p-0">
+                                <Tabs defaultValue="avance">
+                                  <div className="px-6 pt-2 pb-0 border-b border-border">
+                                    <TabsList className="h-8 bg-transparent gap-1 p-0">
+                                      <TabsTrigger value="avance" className="h-7 text-xs rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-3">
+                                        Avance
+                                      </TabsTrigger>
+                                      <TabsTrigger value="consultas" className="h-7 text-xs rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-3 gap-1">
+                                        <MessageSquare className="h-3 w-3" />
+                                        Consultas
+                                      </TabsTrigger>
+                                    </TabsList>
+                                  </div>
+                                  <TabsContent value="avance" className="mt-0 px-6 py-4">
+                                  <div className="flex flex-col gap-4">
                                     {/* Project info grid */}
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                         <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
@@ -292,30 +277,26 @@ export default function ExternoProyectosPage() {
                                         <div className="flex flex-col gap-1">
                                             {project.tasks.map((task) => {
                                                 const progress = calcProgress(task)
-                                                const taskCommentCount = getTaskComments(task.id).length
                                                 return (
                                                     <div
                                                         key={task.id}
                                                         className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
                                                         onClick={() => { setSelectedTask(task); setSelectedProjectName(project.name) }}
                                                     >
-                                                        {task.status === "cerrada" ? (
+                                                        {task.status === "finalizado" ? (
                                                             <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                                                        ) : task.status === "pendiente_aprobacion" ? (
+                                                        ) : task.status === "listo_para_revision" ? (
                                                             <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
                                                         ) : (
                                                             <Circle className="h-4 w-4 text-muted-foreground shrink-0" />
                                                         )}
-                                                        <span className={cn("text-sm flex-1 truncate", task.status === "cerrada" && "line-through text-muted-foreground")}>
+                                                        <span className={cn("text-sm flex-1 truncate", task.status === "finalizado" && "line-through text-muted-foreground")}>
                                                             {task.name}
                                                         </span>
-                                                        {task.status === "pendiente_aprobacion" && (
+                                                        {task.status === "listo_para_revision" && (
                                                             <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-amber-500/15 text-amber-600 border-amber-500/20">
                                                                 Pendiente
                                                             </Badge>
-                                                        )}
-                                                        {taskCommentCount > 0 && (
-                                                            <span className="text-[10px] text-muted-foreground">{taskCommentCount} 💬</span>
                                                         )}
                                                         {task.activities.length > 0 && (
                                                             <div className="flex items-center gap-2 shrink-0">
@@ -343,6 +324,20 @@ export default function ExternoProyectosPage() {
                                             {pendingTasks} tarea{pendingTasks > 1 ? "s" : ""} pendiente{pendingTasks > 1 ? "s" : ""} de aprobación del coordinador
                                         </div>
                                     )}
+                                  </div>
+                                  </TabsContent>
+                                  <TabsContent value="consultas" className="mt-0 px-4 py-4">
+                                    <ChatPanel
+                                      projectId={project.id}
+                                      isClientMessage={true}
+                                      title="Consultas al equipo"
+                                      placeholder="Escribí tu consulta o comentario..."
+                                    />
+                                    <p className="text-xs text-muted-foreground text-center mt-2">
+                                      Tus mensajes son visibles solo para admin y coordinadores del proyecto.
+                                    </p>
+                                  </TabsContent>
+                                </Tabs>
                                 </CardContent>
                             </Card>
                         )
@@ -410,9 +405,9 @@ export default function ExternoProyectosPage() {
                         <>
                             <DialogHeader>
                                 <DialogTitle className="flex items-center gap-2">
-                                    {selectedTask.status === "cerrada" ? (
+                                    {selectedTask.status === "finalizado" ? (
                                         <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-                                    ) : selectedTask.status === "pendiente_aprobacion" ? (
+                                    ) : selectedTask.status === "listo_para_revision" ? (
                                         <AlertCircle className="h-5 w-5 text-amber-500" />
                                     ) : (
                                         <Circle className="h-5 w-5 text-muted-foreground" />
@@ -460,12 +455,12 @@ export default function ExternoProyectosPage() {
                                     </>
                                 )}
 
-                                {/* Comments Section */}
+                                {/* Comunicación */}
                                 <div className="border-t border-border pt-4">
-                                    <CommentSection
-                                        comments={getTaskComments(selectedTask.id)}
-                                        onAddComment={handleAddComment}
-                                        currentUserId={user?.id ?? ""}
+                                    <ChatPanel
+                                        taskId={selectedTask.id}
+                                        title="Comunicación"
+                                        placeholder="Escribí un mensaje sobre esta tarea..."
                                     />
                                 </div>
                             </div>

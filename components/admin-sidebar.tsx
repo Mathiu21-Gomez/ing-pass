@@ -6,18 +6,22 @@ import { usePathname } from "next/navigation"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
+import useSWR from "swr"
 import {
   LayoutDashboard,
   Users,
   FolderKanban,
   Building2,
   LogOut,
-  Moon,
-  Sun,
   History,
   Menu,
+  ShieldCheck,
+  Home,
+  Inbox,
+  ListTodo,
+  Timer,
+  Clock,
 } from "lucide-react"
-import { useTheme } from "next-themes"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import {
@@ -29,18 +33,29 @@ import {
 } from "@/components/ui/sheet"
 
 const navItems = [
+  { href: "/admin/home", label: "Inicio", icon: Home },
+  { href: "/admin/mi-jornada", label: "Mi Jornada", icon: Timer },
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/historial", label: "Historial", icon: History },
+  { href: "/admin/historial", label: "Historial Equipo", icon: History },
+  { href: "/admin/mi-historial", label: "Mi Historial", icon: Clock },
   { href: "/admin/clientes", label: "Clientes", icon: Building2 },
   { href: "/admin/usuarios", label: "Usuarios", icon: Users },
   { href: "/admin/proyectos", label: "Proyectos", icon: FolderKanban },
+  { href: "/admin/tareas", label: "Tareas", icon: ListTodo },
+  { href: "/admin/bandeja", label: "Bandeja", icon: Inbox },
+  { href: "/admin/roles", label: "Roles y Permisos", icon: ShieldCheck },
 ]
 
 function SidebarContent({ onItemClick }: { onItemClick?: () => void }) {
   const pathname = usePathname()
   const { logout, user } = useAuth()
   const router = useRouter()
-  const { theme, setTheme } = useTheme()
+
+  const { data: messages = [] } = useSWR<{ isPreStart: boolean; readAt: string | null }[]>(
+    "/api/messages",
+    { refreshInterval: 30_000, dedupingInterval: 15_000 }
+  )
+  const preStartCount = messages.filter((m) => m.isPreStart && !m.readAt).length
 
   function handleLogout() {
     logout()
@@ -51,7 +66,7 @@ function SidebarContent({ onItemClick }: { onItemClick?: () => void }) {
     <>
       {/* Header corporativo con gradiente sutil */}
       <div className="relative px-4 py-4">
-        <div className="absolute inset-0 bg-gradient-to-b from-sidebar-primary/5 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-b from-sidebar-primary/8 to-transparent border-b border-sidebar-border/50" />
         <div className="relative flex items-center gap-3">
           <Image
             src="/Logo BIMakers con Texto Gris.png"
@@ -74,6 +89,7 @@ function SidebarContent({ onItemClick }: { onItemClick?: () => void }) {
       <nav className="flex flex-1 flex-col gap-0.5 px-3">
         {navItems.map((item) => {
           const isActive = pathname === item.href
+          const isBandeja = item.href.endsWith("/bandeja")
           return (
             <Link
               key={item.href}
@@ -94,9 +110,13 @@ function SidebarContent({ onItemClick }: { onItemClick?: () => void }) {
                 )}
               />
               {item.label}
-              {isActive && (
+              {isBandeja && preStartCount > 0 ? (
+                <span className="ml-auto flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+                  {preStartCount}
+                </span>
+              ) : isActive ? (
                 <div className="ml-auto h-1.5 w-1.5 rounded-full bg-sidebar-primary animate-pulse-soft" />
-              )}
+              ) : null}
             </Link>
           )
         })}
@@ -104,18 +124,6 @@ function SidebarContent({ onItemClick }: { onItemClick?: () => void }) {
 
       {/* Footer con perfil corporativo */}
       <div className="border-t border-sidebar-border p-3">
-        <div className="flex items-center gap-2 mb-3 px-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-sidebar-foreground/50 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          >
-            <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-            <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-          </Button>
-        </div>
-
         {/* User card corporativo */}
         <div className="rounded-xl bg-sidebar-accent/60 p-3">
           <div className="flex items-center gap-3">
@@ -177,7 +185,7 @@ export function AdminSidebar() {
       </div>
 
       {/* Desktop: Fixed sidebar */}
-      <aside className="hidden md:flex h-screen w-64 flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border">
+      <aside className="hidden md:flex h-screen w-64 flex-col bg-sidebar/95 backdrop-blur-xl text-sidebar-foreground border-r border-sidebar-border">
         <SidebarContent />
       </aside>
     </>

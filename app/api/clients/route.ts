@@ -2,8 +2,25 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/db"
 import { clients } from "@/db/schema"
 import { clientSchema } from "@/lib/schemas"
+import { eq } from "drizzle-orm"
+import { getAuthUser, requireRole } from "@/lib/api-auth"
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const { user, error } = await getAuthUser(request)
+  if (error) return error
+
+  if (user.role === 'externo') {
+    const matchingClient = await db
+      .select()
+      .from(clients)
+      .where(eq(clients.email, user.email))
+      .limit(1)
+    return NextResponse.json(matchingClient)
+  }
+
+  const roleError = requireRole(user, ['admin', 'coordinador'])
+  if (roleError) return roleError
+
   try {
     const allClients = await db.select().from(clients)
     return NextResponse.json(allClients)
@@ -17,6 +34,12 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const { user, error } = await getAuthUser(request)
+  if (error) return error
+
+  const roleError = requireRole(user, ['admin'])
+  if (roleError) return roleError
+
   try {
     const body = await request.json()
     const parsed = clientSchema.safeParse(body)

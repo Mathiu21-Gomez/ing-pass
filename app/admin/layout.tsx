@@ -4,21 +4,52 @@ import React from "react"
 
 import { useAuth } from "@/lib/contexts/auth-context"
 import { usePathname, useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { AdminSidebar } from "@/components/admin-sidebar"
+import { TimerAlerts } from "@/components/timer-alerts"
+import { toast } from "sonner"
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
   const [ready, setReady] = useState(false)
+  const shownAlerts = useRef<Set<string>>(new Set())
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setReady(true)
-    }, 50)
+    const timer = setTimeout(() => setReady(true), 50)
     return () => clearTimeout(timer)
   }, [])
+
+  // ── Alert polling ──────────────────────────────────────────────
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    async function checkAlerts() {
+      try {
+        const res = await fetch("/api/alerts")
+        if (!res.ok) return
+        const alerts: { id: string; taskId: string; taskName: string; correlativeId: number; message: string }[] = await res.json()
+        for (const alert of alerts) {
+          if (shownAlerts.current.has(alert.id)) continue
+          shownAlerts.current.add(alert.id)
+          toast(`#${alert.correlativeId} · ${alert.taskName}`, {
+            description: alert.message || "Recordatorio de tarea",
+            icon: "🔔",
+            duration: Infinity,
+            action: {
+              label: "Descartar",
+              onClick: () => fetch(`/api/alerts/${alert.id}`, { method: "PATCH" }),
+            },
+          })
+        }
+      } catch { /* silent */ }
+    }
+
+    checkAlerts()
+    const interval = setInterval(checkAlerts, 60_000)
+    return () => clearInterval(interval)
+  }, [isAuthenticated])
 
   useEffect(() => {
     if (!ready) return
@@ -42,11 +73,19 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     const segments = pathname.split("/").filter(Boolean)
     const page = segments[segments.length - 1] ?? "dashboard"
     const titles: Record<string, string> = {
+      home: "Inicio",
       dashboard: "Dashboard",
-      historial: "Historial",
+      "mi-jornada": "Mi Jornada",
+      "mi-historial": "Mi Historial",
+      historial: "Historial Equipo",
+      tareas: "Tareas",
+      bandeja: "Bandeja",
       clientes: "Clientes",
       usuarios: "Usuarios",
       proyectos: "Proyectos",
+      notas: "Notas",
+      comunicacion: "Comunicación",
+      roles: "Roles y Permisos",
     }
     return titles[page] ?? "Panel"
   }
@@ -55,8 +94,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <div className="flex h-screen overflow-hidden bg-background">
       <AdminSidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
+
         {/* Top bar corporativo */}
-        <header className="hidden md:flex h-14 items-center justify-between border-b border-border bg-card/50 backdrop-blur-sm px-6">
+        <header className="hidden md:flex h-14 items-center justify-between border-b border-border/50 bg-surface-1/80 backdrop-blur-xl px-6">
           <div className="flex items-center gap-3">
             <h2 className="text-sm font-semibold text-foreground">
               {getPageTitle()}
@@ -78,11 +118,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
         </header>
 
-        {/* Content area con padding mejorado */}
-        <main className="flex-1 overflow-y-auto">
-          <div className="p-6 lg:p-8 page-enter">{children}</div>
-        </main>
+        {/* Content area */}
+        {pathname.endsWith("/noticias") ? (
+          <main className="flex-1 overflow-hidden flex flex-col min-h-0">
+            {children}
+          </main>
+        ) : (
+          <main className="flex-1 overflow-y-auto">
+            <div className="p-6 lg:p-8 page-enter">{children}</div>
+          </main>
+        )}
       </div>
+      <TimerAlerts />
     </div>
   )
 }

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_engram_engram__mem_session_summary",
+      "mcp__plugin_engram_engram__mem_context",
+      "Bash(pnpm add:*)",
+      "Bash(node -e \"const pkg = require\\(''./package.json''\\); console.log\\(''@dnd-kit/core:'', pkg.dependencies[''@dnd-kit/core'']\\); console.log\\(''@dnd-kit/sortable:'', pkg.dependencies[''@dnd-kit/sortable'']\\); console.log\\(''@dnd-kit/utilities:'', pkg.dependencies[''@dnd-kit/utilities'']\\);\")",
+      "mcp__plugin_engram_engram__mem_save",
+      "Bash(pnpm dlx:*)",
+      "Bash(pnpm:*)",
+      "Bash(npx skills:*)",
+      "Bash(npx:*)"
+    ]
+  }
+}

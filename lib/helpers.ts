@@ -180,7 +180,7 @@ export function getKPIData(projects: Project[], users: User[]) {
 
     const tasksByProject = projects.map((p) => {
         const total = p.tasks.length
-        const closed = p.tasks.filter((t) => t.status === "cerrada").length
+        const closed = p.tasks.filter((t) => t.status === "finalizado").length
         return {
             projectId: p.id,
             projectName: p.name,
@@ -206,7 +206,7 @@ export function getKPIData(projects: Project[], users: User[]) {
             completedActivities: completed,
             progressRate: total > 0 ? Math.round((completed / total) * 100) : 0,
             totalTasks: userTasks.length,
-            closedTasks: userTasks.filter((t) => t.status === "cerrada").length,
+            closedTasks: userTasks.filter((t) => t.status === "finalizado").length,
         }
     })
 

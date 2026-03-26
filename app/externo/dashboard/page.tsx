@@ -30,9 +30,9 @@ const statusConfig: Record<string, { className: string; label: string }> = {
 }
 
 const taskStatusConfig: Record<string, { label: string; className: string }> = {
-    abierta: { label: "Abierta", className: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20" },
-    cerrada: { label: "Cerrada", className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" },
-    pendiente_aprobacion: { label: "Pendiente", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20" },
+    pendiente: { label: "Abierta", className: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20" },
+    finalizado: { label: "Cerrada", className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" },
+    listo_para_revision: { label: "Pendiente", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20" },
 }
 
 export default function ExternoDashboardPage() {
@@ -52,7 +52,7 @@ export default function ExternoDashboardPage() {
 
     // Global KPIs
     const totalTasks = clientProjects.reduce((sum, p) => sum + p.tasks.length, 0)
-    const closedTasks = clientProjects.reduce((sum, p) => sum + p.tasks.filter((t) => t.status === "cerrada").length, 0)
+    const closedTasks = clientProjects.reduce((sum, p) => sum + p.tasks.filter((t) => t.status === "finalizado").length, 0)
     const totalActivities = clientProjects.reduce((sum, p) => sum + p.tasks.reduce((s, t) => s + t.activities.length, 0), 0)
     const completedActivities = clientProjects.reduce((sum, p) => sum + p.tasks.reduce((s, t) => s + t.activities.filter((a) => a.completed).length, 0), 0)
     const globalProgress = totalActivities > 0 ? Math.round((completedActivities / totalActivities) * 100) : 0
@@ -141,8 +141,8 @@ export default function ExternoDashboardPage() {
                         const pTotalAct = project.tasks.reduce((s, t) => s + t.activities.length, 0)
                         const pCompAct = project.tasks.reduce((s, t) => s + t.activities.filter((a) => a.completed).length, 0)
                         const pProgress = pTotalAct > 0 ? Math.round((pCompAct / pTotalAct) * 100) : 0
-                        const pClosedTasks = project.tasks.filter((t) => t.status === "cerrada").length
-                        const pPendingTasks = project.tasks.filter((t) => t.status === "pendiente_aprobacion").length
+                        const pClosedTasks = project.tasks.filter((t) => t.status === "finalizado").length
+                        const pPendingTasks = project.tasks.filter((t) => t.status === "listo_para_revision").length
 
                         const start = new Date(project.startDate)
                         const end = new Date(project.endDate)
@@ -249,14 +249,14 @@ export default function ExternoDashboardPage() {
                                                 const tProg = tAct > 0 ? Math.round((tComp / tAct) * 100) : 0
                                                 return (
                                                     <div key={task.id} className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-muted/50 transition-colors">
-                                                        {task.status === "cerrada" ? (
+                                                        {task.status === "finalizado" ? (
                                                             <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                                                        ) : task.status === "pendiente_aprobacion" ? (
+                                                        ) : task.status === "listo_para_revision" ? (
                                                             <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
                                                         ) : (
                                                             <Circle className="h-4 w-4 text-muted-foreground shrink-0" />
                                                         )}
-                                                        <span className={cn("text-sm flex-1 truncate", task.status === "cerrada" && "line-through text-muted-foreground")}>
+                                                        <span className={cn("text-sm flex-1 truncate", task.status === "finalizado" && "line-through text-muted-foreground")}>
                                                             {task.name}
                                                         </span>
                                                         <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 h-4", taskStatusConfig[task.status]?.className)}>

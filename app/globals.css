@@ -8,6 +8,19 @@
   }
 }
 
+/* ── View Transitions — theme ripple ── */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-new(root) {
+  z-index: 9999;
+}
+::view-transition-old(root) {
+  z-index: 1;
+}
+
 @layer base {
   :root {
     /* === TEMA CORPORATIVO === */
@@ -53,6 +66,16 @@
     --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 100%;
+
+    /* Elevation surfaces */
+    --surface-0: 210 20% 98%;
+    --surface-1: 0 0% 100%;
+    --surface-2: 210 40% 99%;
+    --surface-3: 210 40% 100%;
+    --surface-kanban: 210 20% 96%;
+    --surface-kanban-column: 210 20% 98%;
+    --surface-kanban-card: 0 0% 100%;
+    --surface-worker: 214 32% 94%;
   }
 
   .dark {
@@ -96,6 +119,16 @@
     --success-foreground: 0 0% 100%;
     --warning: 38 88% 55%;
     --warning-foreground: 0 0% 100%;
+
+    /* Elevation surfaces */
+    --surface-0: 222 47% 5%;
+    --surface-1: 222 47% 8%;
+    --surface-2: 222 47% 10%;
+    --surface-3: 222 47% 12%;
+    --surface-kanban: 222 47% 6%;
+    --surface-kanban-column: 222 47% 8%;
+    --surface-kanban-card: 222 47% 10%;
+    --surface-worker: 222 47% 5%;
   }
 }
 
@@ -154,7 +187,7 @@
 @keyframes fade-in-up {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(8px);
   }
 
   to {
@@ -210,6 +243,10 @@
   opacity: 1;
 }
 
+.dark .nav-indicator[data-active="true"]::before {
+  box-shadow: 0 0 8px 1px hsl(var(--sidebar-primary) / 0.3);
+}
+
 /* Botones con efecto press */
 .btn-press {
   transition: transform 0.1s ease;
@@ -244,7 +281,7 @@
 
 /* Page enter transition */
 .page-enter {
-  animation: fade-in-up 0.4s ease-out;
+  animation: fade-in-up 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* Table row hover corporativo */
@@ -293,4 +330,35 @@
   50% {
     opacity: 0.5;
   }
+}
+
+/* ============================================
+   WORKER LAYOUT — light mode contrast
+   ============================================ */
+
+/* Fondo estructurado: gris suave para que las cards blancas "floten" */
+.worker-layout {
+  background-color: hsl(214 32% 94%);
+}
+
+/* En dark, mantener el background original */
+.dark .worker-layout {
+  background-color: hsl(var(--background));
+}
+
+/* Cards en worker layout tienen shadow sutil en light para elevarlas */
+.worker-layout .card-hover,
+.worker-layout [class*="rounded"][class*="border"] {
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.07), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+}
+
+/* Dark no necesita shadow extra */
+.dark .worker-layout .card-hover,
+.dark .worker-layout [class*="rounded"][class*="border"] {
+  box-shadow: none;
+}
+
+/* list-enter utility — stagger más rápido para listas */
+.list-enter > * {
+  animation: fade-in-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }

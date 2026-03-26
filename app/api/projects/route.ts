@@ -8,15 +8,124 @@ import {
   taskAssignments,
   activities,
   documents,
+  clients,
 } from "@/db/schema"
 import { projectSchema } from "@/lib/schemas"
-import { eq } from "drizzle-orm"
+import { eq, inArray } from "drizzle-orm"
+import { getAuthUser, requireRole } from "@/lib/api-auth"
 
 export async function GET(request: NextRequest) {
+  const { user: authUser, error } = await getAuthUser(request)
+  if (error) return error
+
   try {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get("status")
     const clientId = searchParams.get("clientId")
+
+    if (authUser.role === 'externo') {
+      const matchingClient = await db
+        .select({ id: clients.id })
+        .from(clients)
+        .where(eq(clients.email, authUser.email))
+        .limit(1)
+
+      if (matchingClient.length === 0) {
+        return NextResponse.json([])
+      }
+
+      const allProjects = await db.select().from(projects).where(eq(projects.clientId, matchingClient[0].id))
+
+      if (allProjects.length === 0) {
+        return NextResponse.json([])
+      }
+
+      const projectIds = allProjects.map((p) => p.id)
+
+      const [allWorkers, allUrls, allTasks, allProjectDocs] = await Promise.all([
+        db.select().from(projectWorkers).where(inArray(projectWorkers.projectId, projectIds)),
+        db.select().from(projectUrls).where(inArray(projectUrls.projectId, projectIds)),
+        db.select().from(tasks).where(inArray(tasks.projectId, projectIds)),
+        db.select().from(documents).where(inArray(documents.projectId, projectIds)),
+      ])
+
+      const taskIds = allTasks.map((t) => t.id)
+      const [allAssignments, allActivities, allTaskDocs] =
+        taskIds.length > 0
+          ? await Promise.all([
+              db.select().from(taskAssignments).where(inArray(taskAssignments.taskId, taskIds)),
+              db.select().from(activities).where(inArray(activities.taskId, taskIds)),
+              db.select().from(documents).where(inArray(documents.taskId, taskIds)),
+            ])
+          : [[], [], []]
+
+      const workersByProject = new Map<string, string[]>()
+      for (const w of allWorkers) {
+        const list = workersByProject.get(w.projectId) ?? []
+        list.push(w.userId)
+        workersByProject.set(w.projectId, list)
+      }
+
+      const urlsByProject = new Map<string, { label: string; url: string }[]>()
+      for (const u of allUrls) {
+        const list = urlsByProject.get(u.projectId) ?? []
+        list.push({ label: u.label, url: u.url })
+        urlsByProject.set(u.projectId, list)
+      }
+
+      const tasksByProject = new Map<string, typeof allTasks>()
+      for (const t of allTasks) {
+        const list = tasksByProject.get(t.projectId) ?? []
+        list.push(t)
+        tasksByProject.set(t.projectId, list)
+      }
+
+      const docsByProject = new Map<string, typeof allProjectDocs>()
+      for (const d of allProjectDocs) {
+        const list = docsByProject.get(d.projectId!) ?? []
+        list.push(d)
+        docsByProject.set(d.projectId!, list)
+      }
+
+      const assignmentsByTask = new Map<string, string[]>()
+      for (const a of allAssignments) {
+        const list = assignmentsByTask.get(a.taskId) ?? []
+        list.push(a.userId)
+        assignmentsByTask.set(a.taskId, list)
+      }
+
+      const activitiesByTask = new Map<string, typeof allActivities>()
+      for (const a of allActivities) {
+        const list = activitiesByTask.get(a.taskId!) ?? []
+        list.push(a)
+        activitiesByTask.set(a.taskId!, list)
+      }
+
+      const docsByTask = new Map<string, typeof allTaskDocs>()
+      for (const d of allTaskDocs) {
+        const list = docsByTask.get(d.taskId!) ?? []
+        list.push(d)
+        docsByTask.set(d.taskId!, list)
+      }
+
+      const enriched = allProjects.map((project) => {
+        const projectTaskList = tasksByProject.get(project.id) ?? []
+        return {
+          ...project,
+          assignedWorkers: workersByProject.get(project.id) ?? [],
+          urls: urlsByProject.get(project.id) ?? [],
+          tasks: projectTaskList.map((task) => ({
+            ...task,
+            assignedTo: assignmentsByTask.get(task.id) ?? [],
+            activities: activitiesByTask.get(task.id) ?? [],
+            documents: docsByTask.get(task.id) ?? [],
+          })),
+          documents: docsByProject.get(project.id) ?? [],
+        }
+      })
+
+      return NextResponse.json(enriched)
+    }
 
     let query = db.select().from(projects)
 
@@ -29,63 +138,97 @@ export async function GET(request: NextRequest) {
 
     const allProjects = await query
 
-    const enriched = await Promise.all(
-      allProjects.map(async (project) => {
-        const workers = await db
-          .select()
-          .from(projectWorkers)
-          .where(eq(projectWorkers.projectId, project.id))
+    if (allProjects.length === 0) {
+      return NextResponse.json([])
+    }
 
-        const urls = await db
-          .select()
-          .from(projectUrls)
-          .where(eq(projectUrls.projectId, project.id))
+    const projectIds = allProjects.map((p) => p.id)
 
-        const projectTasks = await db
-          .select()
-          .from(tasks)
-          .where(eq(tasks.projectId, project.id))
+    // Batch fetch: todos los datos relacionados a proyectos en paralelo
+    const [allWorkers, allUrls, allTasks, allProjectDocs] = await Promise.all([
+      db.select().from(projectWorkers).where(inArray(projectWorkers.projectId, projectIds)),
+      db.select().from(projectUrls).where(inArray(projectUrls.projectId, projectIds)),
+      db.select().from(tasks).where(inArray(tasks.projectId, projectIds)),
+      db.select().from(documents).where(inArray(documents.projectId, projectIds)),
+    ])
 
-        const projectDocs = await db
-          .select()
-          .from(documents)
-          .where(eq(documents.projectId, project.id))
+    // Batch fetch: todos los datos relacionados a tareas en paralelo
+    const taskIds = allTasks.map((t) => t.id)
+    const [allAssignments, allActivities, allTaskDocs] =
+      taskIds.length > 0
+        ? await Promise.all([
+            db.select().from(taskAssignments).where(inArray(taskAssignments.taskId, taskIds)),
+            db.select().from(activities).where(inArray(activities.taskId, taskIds)),
+            db.select().from(documents).where(inArray(documents.taskId, taskIds)),
+          ])
+        : [[], [], []]
 
-        const enrichedTasks = await Promise.all(
-          projectTasks.map(async (task) => {
-            const assigns = await db
-              .select()
-              .from(taskAssignments)
-              .where(eq(taskAssignments.taskId, task.id))
+    // Lookup maps O(1)
+    const workersByProject = new Map<string, string[]>()
+    for (const w of allWorkers) {
+      const list = workersByProject.get(w.projectId) ?? []
+      list.push(w.userId)
+      workersByProject.set(w.projectId, list)
+    }
 
-            const taskActivities = await db
-              .select()
-              .from(activities)
-              .where(eq(activities.taskId, task.id))
+    const urlsByProject = new Map<string, { label: string; url: string }[]>()
+    for (const u of allUrls) {
+      const list = urlsByProject.get(u.projectId) ?? []
+      list.push({ label: u.label, url: u.url })
+      urlsByProject.set(u.projectId, list)
+    }
 
-            const taskDocs = await db
-              .select()
-              .from(documents)
-              .where(eq(documents.taskId, task.id))
+    const tasksByProject = new Map<string, typeof allTasks>()
+    for (const t of allTasks) {
+      const list = tasksByProject.get(t.projectId) ?? []
+      list.push(t)
+      tasksByProject.set(t.projectId, list)
+    }
 
-            return {
-              ...task,
-              assignedTo: assigns.map((a) => a.userId),
-              activities: taskActivities,
-              documents: taskDocs,
-            }
-          })
-        )
+    const docsByProject = new Map<string, typeof allProjectDocs>()
+    for (const d of allProjectDocs) {
+      const list = docsByProject.get(d.projectId!) ?? []
+      list.push(d)
+      docsByProject.set(d.projectId!, list)
+    }
 
-        return {
-          ...project,
-          assignedWorkers: workers.map((w) => w.userId),
-          urls: urls.map((u) => ({ label: u.label, url: u.url })),
-          tasks: enrichedTasks,
-          documents: projectDocs,
-        }
-      })
-    )
+    const assignmentsByTask = new Map<string, string[]>()
+    for (const a of allAssignments) {
+      const list = assignmentsByTask.get(a.taskId) ?? []
+      list.push(a.userId)
+      assignmentsByTask.set(a.taskId, list)
+    }
+
+    const activitiesByTask = new Map<string, typeof allActivities>()
+    for (const a of allActivities) {
+      const list = activitiesByTask.get(a.taskId!) ?? []
+      list.push(a)
+      activitiesByTask.set(a.taskId!, list)
+    }
+
+    const docsByTask = new Map<string, typeof allTaskDocs>()
+    for (const d of allTaskDocs) {
+      const list = docsByTask.get(d.taskId!) ?? []
+      list.push(d)
+      docsByTask.set(d.taskId!, list)
+    }
+
+    // Armar respuesta en memoria
+    const enriched = allProjects.map((project) => {
+      const projectTaskList = tasksByProject.get(project.id) ?? []
+      return {
+        ...project,
+        assignedWorkers: workersByProject.get(project.id) ?? [],
+        urls: urlsByProject.get(project.id) ?? [],
+        tasks: projectTaskList.map((task) => ({
+          ...task,
+          assignedTo: assignmentsByTask.get(task.id) ?? [],
+          activities: activitiesByTask.get(task.id) ?? [],
+          documents: docsByTask.get(task.id) ?? [],
+        })),
+        documents: docsByProject.get(project.id) ?? [],
+      }
+    })
 
     return NextResponse.json(enriched)
   } catch (error) {
@@ -98,6 +241,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const { user, error } = await getAuthUser(request)
+  if (error) return error
+
+  const roleError = requireRole(user, ['admin', 'coordinador'])
+  if (roleError) return roleError
+
   try {
     const body = await request.json()
     const parsed = projectSchema.safeParse(body)

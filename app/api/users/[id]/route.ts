@@ -3,6 +3,7 @@ import { db } from "@/db"
 import { user, userSchedules } from "@/db/schema"
 import { userSchema } from "@/lib/schemas"
 import { eq, and } from "drizzle-orm"
+import { getAuthUser, requireRole } from "@/lib/api-auth"
 
 async function getUserWithSchedule(id: string) {
   const found = await db.select().from(user).where(eq(user.id, id))
@@ -28,11 +29,18 @@ async function getUserWithSchedule(id: string) {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user: authUser, error } = await getAuthUser(request)
+  if (error) return error
+
   try {
     const { id } = await params
+
+    if (!['admin', 'coordinador'].includes(authUser.role) && authUser.id !== id) {
+      return NextResponse.json({ error: "Sin permisos suficientes" }, { status: 403 })
+    }
     const result = await getUserWithSchedule(id)
 
     if (!result) {
@@ -56,6 +64,12 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user: authUser, error: authError } = await getAuthUser(request)
+  if (authError) return authError
+
+  const roleError = requireRole(authUser, ['admin'])
+  if (roleError) return roleError
+
   try {
     const { id } = await params
     const body = await request.json()
@@ -113,9 +127,15 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user: authUser, error: authError } = await getAuthUser(request)
+  if (authError) return authError
+
+  const roleError = requireRole(authUser, ['admin'])
+  if (roleError) return roleError
+
   try {
     const { id } = await params
 

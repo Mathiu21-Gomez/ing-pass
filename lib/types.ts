@@ -5,7 +5,14 @@ export type ProjectStatus = "Activo" | "Pausado" | "Finalizado"
 
 export type TimerStatus = "trabajando" | "colacion" | "pausado" | "reunion" | "finalizado" | "inactivo"
 
-export type TaskStatus = "abierta" | "cerrada" | "pendiente_aprobacion"
+export type TaskStatus =
+  | "pendiente"
+  | "en_curso"
+  | "esperando_info"
+  | "bloqueado"
+  | "listo_para_revision"
+  | "finalizado"
+  | "retrasado"
 
 export type WorkerStatus = "disponible" | "en_reunion" | "trabajando" | "ausente"
 
@@ -19,13 +26,13 @@ export interface DocumentAttachment {
   uploadedAt: string
 }
 
-// ── Imagen adjunta ──
-export interface ImageAttachment {
+// ── Attachment de comentario (base64) ──
+export interface CommentAttachment {
   id: string
   name: string
-  url: string
-  uploadedBy: string
-  uploadedAt: string
+  type: string
+  size: number
+  data: string   // base64
 }
 
 // ── Cliente ──
@@ -83,16 +90,41 @@ export interface Comment {
   parentId: string
   authorId: string
   text: string
+  mentions: string[]
   createdAt: string
-  imageAttachments?: ImageAttachment[]
+  attachments: CommentAttachment[]
   referenceId?: string
+}
+
+// ── Etiqueta ──
+export interface Tag {
+  id: string
+  name: string
+  color: string
+  projectId: string | null
+  createdBy: string
+  createdAt: string
+}
+
+// ── Alerta de tarea ──
+export interface TaskAlert {
+  id: string
+  taskId: string
+  userId: string
+  alertAt: string
+  message: string
+  dismissed: boolean
+  createdAt: string
 }
 
 // ── Tarea ──
 export interface Task {
   id: string
+  correlativeId: number
   name: string
   description: string
+  guidelines: string | null
+  priority: number
   projectId: string
   assignedTo: string[]
   createdBy: string
@@ -101,6 +133,7 @@ export interface Task {
   status: TaskStatus
   documents: DocumentAttachment[]
   activities: Activity[]
+  tags: Tag[]
 }
 
 // ── Proyecto ──
@@ -118,6 +151,35 @@ export interface Project {
   urls: { label: string; url: string }[]
   tasks: Task[]
   assignedWorkers: string[]
+}
+
+// ── Nota ──
+export type NoteCategory = "trabajo_ayer" | "emergencia" | "anotacion" | "cumpleanos" | "general"
+
+export interface Note {
+  id: string
+  title: string
+  content: string
+  authorId: string
+  authorName: string
+  category: NoteCategory
+  isTeamNote: boolean
+  projectId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+// ── Evento / Comunicado ──
+export interface AppEvent {
+  id: string
+  title: string
+  content: string
+  type: "evento" | "comunicado"
+  eventDate: string | null
+  createdBy: string
+  targetRoles: string[]
+  pinned: boolean
+  createdAt: string
 }
 
 // ── Registro de Tiempo ──
@@ -169,6 +231,7 @@ export interface HourlyProgress {
 
 // ── Dashboard KPIs (from /api/dashboard/kpis) ──
 export interface DashboardKPIs {
+  taskStatusBreakdown: { status: string; count: number }[]
   tasksByProject: {
     projectId: string
     projectName: string

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/db"
 import {
+  clients,
   projects,
   projectWorkers,
   projectUrls,
@@ -10,18 +11,48 @@ import {
   documents,
 } from "@/db/schema"
 import { projectSchema } from "@/lib/schemas"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
+import { getAuthUser, requireRole } from "@/lib/api-auth"
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user: authUser, error } = await getAuthUser(request)
+  if (error) return error
+
   try {
     const { id } = await params
-    const project = await db
-      .select()
-      .from(projects)
-      .where(eq(projects.id, id))
+
+    let project
+
+    if (authUser.role === "externo") {
+      const matchingClient = await db
+        .select({ id: clients.id })
+        .from(clients)
+        .where(eq(clients.email, authUser.email))
+        .limit(1)
+
+      if (matchingClient.length === 0) {
+        return NextResponse.json(
+          { error: "Proyecto no encontrado" },
+          { status: 404 }
+        )
+      }
+
+      project = await db
+        .select()
+        .from(projects)
+        .where(and(eq(projects.id, id), eq(projects.clientId, matchingClient[0].id)))
+    } else {
+      const roleError = requireRole(authUser, ["admin", "coordinador"])
+      if (roleError) return roleError
+
+      project = await db
+        .select()
+        .from(projects)
+        .where(eq(projects.id, id))
+    }
 
     if (project.length === 0) {
       return NextResponse.json(
@@ -96,6 +127,12 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user: authUser, error: authError } = await getAuthUser(request)
+  if (authError) return authError
+
+  const roleError = requireRole(authUser, ["admin", "coordinador"])
+  if (roleError) return roleError
+
   try {
     const { id } = await params
     const body = await request.json()
@@ -147,9 +184,15 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user: authUser, error: authError } = await getAuthUser(request)
+  if (authError) return authError
+
+  const roleError = requireRole(authUser, ["admin", "coordinador"])
+  if (roleError) return roleError
+
   try {
     const { id } = await params
     const deleted = await db

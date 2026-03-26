@@ -4,7 +4,9 @@ import { Inter, JetBrains_Mono } from "next/font/google"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/lib/contexts/auth-context"
 import { TimerProvider } from "@/lib/contexts/timer-context"
+import { SWRProvider } from "@/lib/swr-provider"
 import { Toaster } from "@/components/ui/sonner"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 import "./globals.css"
 
@@ -32,12 +34,15 @@ export default function RootLayout({
     <html lang="es" suppressHydrationWarning>
       <body className={`${_inter.variable} ${_jetbrains.variable} font-sans antialiased`}>
         <ThemeProvider attribute="class" defaultTheme="light" disableTransitionOnChange>
-          <AuthProvider>
-            <TimerProvider>
-              {children}
-              <Toaster richColors position="top-right" />
-            </TimerProvider>
-          </AuthProvider>
+          <SWRProvider>
+            <AuthProvider>
+              <TimerProvider>
+                {children}
+                <ThemeToggle />
+                <Toaster richColors position="top-right" />
+              </TimerProvider>
+            </AuthProvider>
+          </SWRProvider>
         </ThemeProvider>
       </body>
     </html>

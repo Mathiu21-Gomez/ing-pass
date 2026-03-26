@@ -1,13 +1,10 @@
 import { neon } from "@neondatabase/serverless"
 import { drizzle } from "drizzle-orm/neon-http"
+import { getEnv } from "@/lib/env"
 import * as schema from "./schema"
 
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL no está definida. Crea un archivo .env con tu connection string de Neon."
-  )
-}
+const env = getEnv()
 
-const sql = neon(process.env.DATABASE_URL)
+const sql = neon(env.DATABASE_URL)
 
 export const db = drizzle(sql, { schema })

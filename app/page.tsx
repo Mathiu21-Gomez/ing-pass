@@ -1,16 +1,13 @@
 "use client"
 
-import React from "react"
-
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { useTheme } from "next-themes"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { AlertCircle } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { AlertCircle, Loader2 } from "lucide-react"
 import Image from "next/image"
 
 export default function LoginPage() {
@@ -19,18 +16,19 @@ export default function LoginPage() {
   const [error, setError] = useState("")
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const { login, user, isAuthenticated, isLoading } = useAuth()
+  const { theme } = useTheme()
   const router = useRouter()
 
   useEffect(() => {
     if (isAuthenticated && user) {
       const target =
         user.role === "admin"
-          ? "/admin/dashboard"
+          ? "/admin/home"
           : user.role === "coordinador"
-            ? "/coordinador/dashboard"
+            ? "/coordinador/home"
             : user.role === "externo"
               ? "/externo/proyectos"
-              : "/trabajador/mi-jornada"
+              : "/trabajador/home"
       setTimeout(() => router.push(target), 400)
     }
   }, [isAuthenticated, user, router])
@@ -39,9 +37,7 @@ export default function LoginPage() {
     e.preventDefault()
     setError("")
     setIsLoggingIn(true)
-
     const result = await login(email, password)
-
     if (!result.success) {
       setError(result.error || "Credenciales incorrectas o usuario inactivo")
       setIsLoggingIn(false)
@@ -50,100 +46,139 @@ export default function LoginPage() {
 
   if (isLoading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-background p-4">
+      <div className="flex min-h-screen items-center justify-center bg-background dark:bg-background">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-      </main>
+      </div>
     )
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-4">
-      <div
-        className={cn(
-          "w-full max-w-md transition-all duration-500",
-          isLoggingIn && !error && "opacity-0 scale-95 translate-y-4"
-        )}
-      >
-        {/* Logo con float animation */}
-        <div className="mb-8 flex flex-col items-center gap-3 animate-fade-in-up">
-          <div className="animate-float">
+    <div className="flex min-h-screen bg-background dark:bg-background transition-colors duration-300">
+
+      {/* ── Left — Form ── */}
+      <div className="flex w-full flex-col justify-center px-8 py-12 sm:px-12 lg:w-1/2 lg:px-16 xl:px-24">
+        <div className="mx-auto w-full max-w-sm">
+
+          {/* Logo mobile */}
+          <div className="mb-6 flex items-center gap-2 lg:hidden">
             <Image
               src="/Logo BIMakers con Texto Gris.png"
               alt="BIMakers"
-              width={200}
-              height={67}
+              width={120}
+              height={40}
               priority
               className="object-contain"
             />
           </div>
-          <div className="text-center">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground text-balance">
-              Ingeniería PASS
+
+          <div className="mb-10">
+            <h1 className="text-3xl font-bold text-foreground dark:text-foreground">
+              Iniciar sesión
             </h1>
-            <p className="text-sm text-muted-foreground">
-              Control de tiempos y gestión de proyectos
+            <p className="mt-2 text-sm text-muted-foreground dark:text-muted-foreground">
+              Ingresá tus credenciales para acceder al sistema
             </p>
           </div>
-        </div>
 
-        <Card className="animate-scale-in card-hover">
-          <CardHeader>
-            <CardTitle className="text-lg">Iniciar sesión</CardTitle>
-            <CardDescription>
-              Ingresa tu email corporativo para acceder al sistema
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="tu@empresa.cl"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  className="transition-all duration-200 focus:ring-2 focus:ring-primary/20"
-                />
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="space-y-1.5">
+              <Label htmlFor="email" className="text-sm font-medium text-foreground dark:text-muted-foreground">
+                Email
+              </Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="tu@empresa.cl"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className="h-11 border-border bg-card text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20 dark:border-border dark:bg-card dark:text-foreground dark:placeholder:text-muted-foreground"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="password" className="text-sm font-medium text-foreground dark:text-muted-foreground">
+                Contraseña
+              </Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="h-11 border-border bg-card text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20 dark:border-border dark:bg-card dark:text-foreground dark:placeholder:text-muted-foreground"
+              />
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                {error}
               </div>
+            )}
 
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="password">Contraseña</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  className="transition-all duration-200 focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
-
-              {error && (
-                <div className="flex items-center gap-2 rounded-lg bg-destructive/10 p-3 text-sm text-destructive animate-fade-in">
-                  <AlertCircle className="h-4 w-4 shrink-0" />
-                  {error}
-                </div>
+            <Button
+              type="submit"
+              disabled={isLoggingIn}
+              className="w-full h-11 bg-primary hover:bg-primary/90 text-white font-semibold text-sm transition-colors"
+            >
+              {isLoggingIn && !error ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Ingresando...
+                </>
+              ) : (
+                "Ingresar"
               )}
-
-              <Button type="submit" className="w-full btn-press" disabled={isLoggingIn}>
-                {isLoggingIn && !error ? (
-                  <div className="flex items-center gap-2">
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
-                    Ingresando...
-                  </div>
-                ) : (
-                  "Ingresar"
-                )}
-              </Button>
-            </form>
-
-
-          </CardContent>
-        </Card>
+            </Button>
+          </form>
+        </div>
       </div>
-    </main>
+
+      {/* ── Right — Branding ── */}
+      <div
+        className="hidden lg:flex lg:w-1/2 relative items-center justify-center bg-muted dark:bg-surface-0 transition-colors duration-300"
+        style={{
+          backgroundImage:
+            "radial-gradient(circle, rgba(100,116,139,0.15) 1px, transparent 1px)",
+          backgroundSize: "28px 28px",
+        }}
+      >
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-100/60 via-transparent to-transparent dark:from-blue-950/30 pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col items-center gap-6 px-12 text-center">
+          <div className="flex items-center justify-center rounded-2xl bg-card/80 p-6 ring-1 ring-border backdrop-blur dark:bg-muted/20 dark:ring-border">
+            <Image
+              src="/Logo BIMakers con Texto Gris.png"
+              alt="BIMakers"
+              width={180}
+              height={60}
+              priority
+              className="object-contain"
+            />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-foreground dark:text-foreground">
+              Ingeniería PASS
+            </h2>
+            <p className="mt-2 max-w-xs text-sm leading-relaxed text-muted-foreground dark:text-muted-foreground">
+              Sistema de control de tiempos y gestión de proyectos para equipos de ingeniería
+            </p>
+          </div>
+
+          <div className="flex flex-wrap justify-center gap-2 mt-2">
+            {["Proyectos", "Tareas", "Jornadas", "Reportes"].map((tag) => (
+              <span
+                key={tag}
+                className="rounded-full border border-border bg-card/70 px-3 py-1 text-xs text-muted-foreground dark:border-border dark:bg-card/60 dark:text-muted-foreground"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

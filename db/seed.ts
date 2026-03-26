@@ -227,39 +227,42 @@ async function seed() {
   const [task1] = await db
     .insert(schema.tasks)
     .values({
+      correlativeId: 1,
       name: "Diseño de paneles zona norte",
       description:
         "Diseño e ingeniería de la disposición de paneles solares en la zona norte del terreno.",
       projectId,
       createdBy: coordinadorId,
       dueDate: formatDate(getFutureDate(30)),
-      status: "abierta",
+      status: "pendiente",
     })
     .returning({ id: schema.tasks.id })
 
   const [task2] = await db
     .insert(schema.tasks)
     .values({
+      correlativeId: 2,
       name: "Cableado eléctrico zona A",
       description:
         "Instalación del cableado eléctrico principal en la zona A del proyecto.",
       projectId,
       createdBy: coordinadorId,
       dueDate: formatDate(getFutureDate(45)),
-      status: "abierta",
+      status: "pendiente",
     })
     .returning({ id: schema.tasks.id })
 
   const [task3] = await db
     .insert(schema.tasks)
     .values({
+      correlativeId: 3,
       name: "Revisión estructural base",
       description:
         "Revisión y validación de la estructura base para los paneles solares.",
       projectId,
       createdBy: coordinadorId,
       dueDate: formatDate(getPastDate(5)),
-      status: "cerrada",
+      status: "finalizado",
     })
     .returning({ id: schema.tasks.id })
 

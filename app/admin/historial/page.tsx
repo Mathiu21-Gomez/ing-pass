@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useCallback, useMemo } from "react"
+import { ExportDialog } from "@/components/export-dialog"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -40,6 +41,7 @@ export default function HistorialPage() {
     const [projectFilter, setProjectFilter] = useState<string>("all")
     const [startDate, setStartDate] = useState<string>("")
     const [endDate, setEndDate] = useState<string>("")
+    const [showExport, setShowExport] = useState(false)
 
     const fetchProjects = useCallback(() => projectsApi.getAll(), [])
     const fetchUsers = useCallback(() => usersApi.getAll(), [])
@@ -59,44 +61,6 @@ export default function HistorialPage() {
         setExpandedWorker(expandedWorker === workerId ? null : workerId)
     }
 
-    // Export entries to CSV
-    function exportToCSV() {
-        const entriesToExport = allEntries.filter(e => {
-            const entryDate = new Date(e.date)
-            const start = startDate ? new Date(startDate) : null
-            const end = endDate ? new Date(endDate) : null
-
-            if (start && entryDate < start) return false
-            if (end && entryDate > end) return false
-            if (projectFilter !== "all" && e.projectId !== projectFilter) return false
-
-            return true
-        })
-
-        const headers = ["Fecha", "Trabajador", "Proyecto", "Inicio", "Fin", "Horas", "Avance %", "Pausas", "Notas"]
-        const rows = entriesToExport.map(e => {
-            const user = allUsers.find(u => u.id === e.userId)
-            const project = allProjects.find(p => p.id === e.projectId)
-            return [
-                e.date,
-                user?.name ?? "",
-                project?.name ?? "",
-                e.startTime,
-                e.endTime ?? "",
-                e.effectiveHours.toString(),
-                e.progressPercentage?.toString() ?? "0",
-                e.pauseCount?.toString() ?? "0",
-                `"${e.notes?.replace(/"/g, '""') ?? ""}"`
-            ]
-        })
-
-        const csv = [headers.join(","), ...rows.map(r => r.join(","))].join("\n")
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
-        const link = document.createElement("a")
-        link.href = URL.createObjectURL(blob)
-        link.download = `historial_${new Date().toISOString().split("T")[0]}.csv`
-        link.click()
-    }
 
     return (
         <div className="flex flex-col gap-6">
@@ -107,9 +71,9 @@ export default function HistorialPage() {
                         Control de avance y tiempo de todos los trabajadores
                     </p>
                 </div>
-                <Button onClick={exportToCSV} variant="outline" className="gap-2 self-start sm:self-auto btn-press">
-                    <FileSpreadsheet className="h-4 w-4" />
-                    Exportar CSV
+                <Button onClick={() => setShowExport(true)} variant="outline" className="gap-2 self-start sm:self-auto btn-press">
+                    <Download className="h-4 w-4" />
+                    Exportar
                 </Button>
             </div>
 
@@ -419,6 +383,16 @@ export default function HistorialPage() {
                     </Card>
                 )}
             </div>
+
+            <ExportDialog
+                open={showExport}
+                onOpenChange={setShowExport}
+                context="time-entries"
+                filters={{ projectId: projectFilter, startDate, endDate }}
+                data={allEntries as unknown as Record<string, unknown>[]}
+                projects={allProjects.map((p) => ({ id: p.id, name: p.name }))}
+                users={allUsers.map((u) => ({ id: u.id, name: u.name }))}
+            />
         </div>
     )
 }

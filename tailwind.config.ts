@@ -73,6 +73,16 @@ const config: Config = {
           border: 'hsl(var(--sidebar-border))',
           ring: 'hsl(var(--sidebar-ring))',
         },
+        surface: {
+          '0': 'hsl(var(--surface-0))',
+          '1': 'hsl(var(--surface-1))',
+          '2': 'hsl(var(--surface-2))',
+          '3': 'hsl(var(--surface-3))',
+          kanban: 'hsl(var(--surface-kanban))',
+          'kanban-column': 'hsl(var(--surface-kanban-column))',
+          'kanban-card': 'hsl(var(--surface-kanban-card))',
+          worker: 'hsl(var(--surface-worker))',
+        },
       },
       borderRadius: {
         lg: 'var(--radius)',
@@ -94,11 +104,11 @@ const config: Config = {
           to: { opacity: '1' },
         },
         'fade-in-up': {
-          from: { opacity: '0', transform: 'translateY(12px)' },
+          from: { opacity: '0', transform: 'translateY(8px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
         'fade-in-down': {
-          from: { opacity: '0', transform: 'translateY(-12px)' },
+          from: { opacity: '0', transform: 'translateY(-8px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
         'slide-in-left': {
@@ -144,7 +154,7 @@ const config: Config = {
         'accordion-up': 'accordion-up 0.2s ease-out',
         // ✨ Nuevas
         'fade-in': 'fade-in 0.4s ease-out',
-        'fade-in-up': 'fade-in-up 0.5s ease-out',
+        'fade-in-up': 'fade-in-up 0.35s cubic-bezier(0.16, 1, 0.3, 1)',
         'fade-in-down': 'fade-in-down 0.4s ease-out',
         'slide-in-left': 'slide-in-left 0.4s ease-out',
         'slide-in-right': 'slide-in-right 0.4s ease-out',

@@ -3,13 +3,22 @@ import { db } from "@/db"
 import { comments } from "@/db/schema"
 import { commentSchema } from "@/lib/schemas"
 import { eq, and } from "drizzle-orm"
+import { getAuthUser } from "@/lib/api-auth"
+import { getTaskAccessContext } from "@/lib/task-access"
+import { validateAttachments } from "@/lib/validate-attachments"
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user: authUser, error } = await getAuthUser(request)
+  if (error) return error
+
   try {
     const { id: taskId } = await params
+    const { error: accessError } = await getTaskAccessContext(taskId, authUser)
+    if (accessError) return accessError
+
     const taskComments = await db
       .select()
       .from(comments)
@@ -31,8 +40,14 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user: authUser, error: authError } = await getAuthUser(request)
+  if (authError) return authError
+
   try {
     const { id: taskId } = await params
+    const { error: accessError } = await getTaskAccessContext(taskId, authUser)
+    if (accessError) return accessError
+
     const body = await request.json()
     const parsed = commentSchema.safeParse(body)
 
@@ -43,19 +58,23 @@ export async function POST(
       )
     }
 
-    const authorId: string = body.authorId ?? ""
-    const parentType = (body.parentType as "task" | "activity") ?? "task"
-    const parentId = parentType === "task" ? taskId : (body.parentId ?? taskId)
+    const attachmentError = validateAttachments(parsed.data.attachments)
+    if (attachmentError) {
+      return NextResponse.json({ error: attachmentError }, { status: 400 })
+    }
+
+    const authorId: string = authUser.id
     const referenceId: string | undefined = body.referenceId ?? undefined
 
     const [newComment] = await db
       .insert(comments)
       .values({
-        parentType,
-        parentId,
+        parentType: "task",
+        parentId: taskId,
         authorId,
         text: parsed.data.text,
         referenceId: referenceId || null,
+        attachments: parsed.data.attachments ?? [],
       })
       .returning()
 

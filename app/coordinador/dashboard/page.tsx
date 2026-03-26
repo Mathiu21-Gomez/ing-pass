@@ -43,16 +43,16 @@ export default function CoordinadorDashboard() {
     // Summary stats
     const allMyTasks = myProjects.flatMap((p) => p.tasks)
     const totalTasks = allMyTasks.length
-    const closedTasks = allMyTasks.filter((t) => t.status === "cerrada").length
-    const pendingTasks = allMyTasks.filter((t) => t.status === "pendiente_aprobacion").length
-    const openTasks = allMyTasks.filter((t) => t.status === "abierta").length
+    const closedTasks = allMyTasks.filter((t) => t.status === "finalizado").length
+    const pendingTasks = allMyTasks.filter((t) => t.status === "listo_para_revision").length
+    const openTasks = allMyTasks.filter((t) => t.status === "pendiente" || t.status === "en_curso").length
     const totalWorkers = [...new Set(myProjects.flatMap((p) => p.assignedWorkers))].length
 
     // Chart data
     const taskByProjectData = myProjects.map((p) => ({
         name: p.name.split(" ").slice(0, 2).join(" "),
-        completadas: p.tasks.filter((t) => t.status === "cerrada").length,
-        abiertas: p.tasks.filter((t) => t.status !== "cerrada").length,
+        completadas: p.tasks.filter((t) => t.status === "finalizado").length,
+        abiertas: p.tasks.filter((t) => t.status !== "finalizado").length,
     }))
 
     // Pie chart: tasks created by coordinator vs created by users (only this coordinator's projects)
@@ -70,7 +70,7 @@ export default function CoordinadorDashboard() {
                     Dashboard Coordinador
                 </h1>
                 <p className="text-sm text-muted-foreground">
-                    Bienvenido, {user?.name?.split(" ")[0]}. Tienes {myProjects.length} proyectos y {pendingTasks > 0 ? `${pendingTasks} tarea${pendingTasks > 1 ? 's' : ''} pendiente${pendingTasks > 1 ? 's' : ''} de aprobación` : `${openTasks} tarea${openTasks !== 1 ? 's' : ''} abierta${openTasks !== 1 ? 's' : ''}`}.
+                    Bienvenido, {user?.name?.split(" ")[0]}. Tienes {myProjects.length} proyectos y {pendingTasks > 0 ? `${pendingTasks} tarea${pendingTasks > 1 ? 's' : ''} lista${pendingTasks > 1 ? 's' : ''} para revisión` : `${openTasks} tarea${openTasks !== 1 ? 's' : ''} en curso`}.
                 </p>
             </div>
 
@@ -93,7 +93,7 @@ export default function CoordinadorDashboard() {
                     <CardContent className="pt-5 pb-4">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-xs text-muted-foreground">Tareas Cerradas</p>
+                                <p className="text-xs text-muted-foreground">Tareas Finalizadas</p>
                                 <p className="text-2xl font-bold mt-1 text-emerald-600">{closedTasks}/{totalTasks}</p>
                             </div>
                             <div className="h-10 w-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
@@ -189,7 +189,7 @@ export default function CoordinadorDashboard() {
                                 const wu = allUsers.find(u => u.id === wid)
                                 if (!wu) return null
                                 const workerTasks = allMyTasks.filter(t => t.assignedTo.includes(wid))
-                                const closed = workerTasks.filter(t => t.status === "cerrada").length
+                                const closed = workerTasks.filter(t => t.status === "finalizado").length
                                 const total = workerTasks.length
                                 const rate = total > 0 ? Math.round((closed / total) * 100) : 0
                                 return (

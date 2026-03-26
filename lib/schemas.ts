@@ -67,6 +67,15 @@ export const userSchema = z.object({
 
 export type UserFormData = z.infer<typeof userSchema>
 
+export const createUserSchema = userSchema.extend({
+    password: z
+        .string()
+        .min(8, "La contraseña debe tener al menos 8 caracteres")
+        .max(100, "La contraseña no puede exceder 100 caracteres"),
+})
+
+export type CreateUserFormData = z.infer<typeof createUserSchema>
+
 // Schema para Proyecto
 export const projectSchema = z
     .object({
@@ -122,23 +131,33 @@ export type TaskFormData = z.infer<typeof taskSchema>
 export const activitySchema = z.object({
     name: z
         .string()
-        .min(3, "El nombre debe tener al menos 3 caracteres")
+        .min(1, "El nombre es requerido")
         .max(100, "El nombre no puede exceder 100 caracteres"),
     description: z
         .string()
-        .min(5, "La descripción debe tener al menos 5 caracteres")
-        .max(300, "La descripción no puede exceder 300 caracteres"),
+        .max(300, "La descripción no puede exceder 300 caracteres")
+        .optional()
+        .or(z.literal("")),
     dueDate: z.string().optional().or(z.literal("")),
 })
 
 export type ActivityFormData = z.infer<typeof activitySchema>
 
 // Schema para Comentario
+const commentAttachmentSchema = z.object({
+    id: z.string(),
+    name: z.string(),
+    type: z.string(),
+    size: z.number(),
+    data: z.string(),
+})
+
 export const commentSchema = z.object({
     text: z
         .string()
         .min(1, "El comentario no puede estar vacío")
         .max(500, "El comentario no puede exceder 500 caracteres"),
+    attachments: z.array(commentAttachmentSchema).optional(),
 })
 
 export type CommentFormData = z.infer<typeof commentSchema>

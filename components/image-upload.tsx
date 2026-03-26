@@ -4,16 +4,16 @@ import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { ImagePlus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { ImageAttachment } from "@/lib/types"
+import type { CommentAttachment } from "@/lib/types"
 
 interface ImageUploadProps {
-    onImagesChange: (images: ImageAttachment[]) => void
+    onImagesChange: (images: CommentAttachment[]) => void
     maxImages?: number
     className?: string
 }
 
 export function ImageUpload({ onImagesChange, maxImages = 5, className }: ImageUploadProps) {
-    const [previews, setPreviews] = useState<ImageAttachment[]>([])
+    const [previews, setPreviews] = useState<CommentAttachment[]>([])
     const inputRef = useRef<HTMLInputElement>(null)
 
     function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -23,25 +23,34 @@ export function ImageUpload({ onImagesChange, maxImages = 5, className }: ImageU
         const remaining = maxImages - previews.length
         const toAdd = files.slice(0, remaining)
 
-        const newAttachments: ImageAttachment[] = toAdd.map((file) => ({
-            id: `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-            name: file.name,
-            url: URL.createObjectURL(file),
-            uploadedBy: "",  // se llena en el componente padre
-            uploadedAt: new Date().toISOString(),
-        }))
+        let processed = 0
+        const newAttachments: CommentAttachment[] = []
 
-        const updated = [...previews, ...newAttachments]
-        setPreviews(updated)
-        onImagesChange(updated)
+        toAdd.forEach((file) => {
+            const reader = new FileReader()
+            reader.onload = () => {
+                const base64 = (reader.result as string).split(",")[1]
+                newAttachments.push({
+                    id: `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                    name: file.name,
+                    type: file.type,
+                    size: file.size,
+                    data: base64,
+                })
+                processed++
+                if (processed === toAdd.length) {
+                    const updated = [...previews, ...newAttachments]
+                    setPreviews(updated)
+                    onImagesChange(updated)
+                }
+            }
+            reader.readAsDataURL(file)
+        })
 
-        // Reset input
         if (inputRef.current) inputRef.current.value = ""
     }
 
     function removeImage(id: string) {
-        const img = previews.find((p) => p.id === id)
-        if (img) URL.revokeObjectURL(img.url)
         const updated = previews.filter((p) => p.id !== id)
         setPreviews(updated)
         onImagesChange(updated)
@@ -57,7 +66,7 @@ export function ImageUpload({ onImagesChange, maxImages = 5, className }: ImageU
                             className="relative group rounded-lg overflow-hidden border border-border w-20 h-20"
                         >
                             <img
-                                src={img.url}
+                                src={`data:${img.type};base64,${img.data}`}
                                 alt={img.name}
                                 className="w-full h-full object-cover"
                             />
