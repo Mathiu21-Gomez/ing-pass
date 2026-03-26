@@ -1,10 +1,8 @@
 "use client"
 
-import { useState, useCallback, useEffect, useRef } from "react"
+import { useState, useEffect } from "react"
 import { useAuth } from "@/lib/contexts/auth-context"
-import { ExportDialog } from "@/components/export-dialog"
 import type { Task, TaskStatus, Project, User, Tag, Comment, Activity } from "@/lib/types"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -31,12 +29,6 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import {
   Plus,
   Search,
   ChevronDown,
@@ -54,27 +46,26 @@ import {
   Clock,
   CheckCheck,
   Loader2,
-  Download,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
-// ─── Status Config ─────────────────────────────────────────────
+// ─── Status Config ──────────────────────────────────────────────
 const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; icon: React.ReactNode; order: number }> = {
-  en_curso:           { label: "En Curso",              color: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",    icon: <Loader2 className="h-3.5 w-3.5" />,      order: 1 },
-  pendiente:          { label: "Pendiente",             color: "bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/20", icon: <Circle className="h-3.5 w-3.5" />,       order: 2 },
-  retrasado:          { label: "Retrasado",             color: "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/20",         icon: <AlertCircle className="h-3.5 w-3.5" />,  order: 3 },
-  bloqueado:          { label: "Bloqueado",             color: "bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/20", icon: <AlertCircle className="h-3.5 w-3.5" />, order: 4 },
-  esperando_info:     { label: "Esperando información", color: "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400 border-yellow-500/20", icon: <Clock className="h-3.5 w-3.5" />,    order: 5 },
-  listo_para_revision:{ label: "Listo para revisión",  color: "bg-violet-500/15 text-violet-600 dark:text-violet-400 border-violet-500/20", icon: <CheckCircle2 className="h-3.5 w-3.5" />, order: 6 },
-  finalizado:         { label: "Finalizado",            color: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20", icon: <CheckCheck className="h-3.5 w-3.5" />, order: 7 },
+  en_curso:            { label: "En Curso",             color: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",        icon: <Loader2 className="h-3.5 w-3.5" />,        order: 1 },
+  pendiente:           { label: "Pendiente",            color: "bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/20",     icon: <Circle className="h-3.5 w-3.5" />,         order: 2 },
+  retrasado:           { label: "Retrasado",            color: "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/20",             icon: <AlertCircle className="h-3.5 w-3.5" />,    order: 3 },
+  bloqueado:           { label: "Bloqueado",            color: "bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/20", icon: <AlertCircle className="h-3.5 w-3.5" />,    order: 4 },
+  esperando_info:      { label: "Esperando info",       color: "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400 border-yellow-500/20", icon: <Clock className="h-3.5 w-3.5" />,          order: 5 },
+  listo_para_revision: { label: "Para revisión",        color: "bg-violet-500/15 text-violet-600 dark:text-violet-400 border-violet-500/20", icon: <CheckCircle2 className="h-3.5 w-3.5" />,   order: 6 },
+  finalizado:          { label: "Finalizado",           color: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20", icon: <CheckCheck className="h-3.5 w-3.5" />, order: 7 },
 }
 
 const STATUS_ORDER = (Object.keys(STATUS_CONFIG) as TaskStatus[]).sort(
   (a, b) => STATUS_CONFIG[a].order - STATUS_CONFIG[b].order
 )
 
-// ─── Tag Badge ─────────────────────────────────────────────────
+// ─── Tag Badge ──────────────────────────────────────────────────
 function TagBadge({ tag, onRemove }: { tag: Tag; onRemove?: () => void }) {
   return (
     <span
@@ -91,14 +82,8 @@ function TagBadge({ tag, onRemove }: { tag: Tag; onRemove?: () => void }) {
   )
 }
 
-// ─── Alert Dialog (set reminder) ───────────────────────────────
-function AlertDialog({
-  taskId,
-  onClose,
-}: {
-  taskId: string
-  onClose: () => void
-}) {
+// ─── Alert Dialog ───────────────────────────────────────────────
+function AlertDialog({ taskId, onClose }: { taskId: string; onClose: () => void }) {
   const [alertDate, setAlertDate] = useState("")
   const [alertTime, setAlertTime] = useState("09:00")
   const [message, setMessage] = useState("")
@@ -152,7 +137,7 @@ function AlertDialog({
   )
 }
 
-// ─── Task Detail Panel (inline expandible) ────────────────────
+// ─── Task Detail Panel ──────────────────────────────────────────
 function TaskDetailPanel({
   task,
   allUsers,
@@ -176,9 +161,7 @@ function TaskDetailPanel({
   const [showAlertForm, setShowAlertForm] = useState(false)
   const [showTagSelector, setShowTagSelector] = useState(false)
   const [editingDescription, setEditingDescription] = useState(false)
-  const [editingGuidelines, setEditingGuidelines] = useState(false)
   const [descValue, setDescValue] = useState(task.description)
-  const [guidelinesValue, setGuidelinesValue] = useState(task.guidelines ?? "")
   const [taskTags, setTaskTags] = useState<Tag[]>(task.tags ?? [])
   const [activities, setActivities] = useState<Activity[]>(task.activities)
   const [newCheckItem, setNewCheckItem] = useState("")
@@ -199,9 +182,7 @@ function TaskDetailPanel({
   }, [isOpen, task.id])
 
   const sortedComments = [...comments].sort((a, b) =>
-    sortDesc
-      ? b.createdAt.localeCompare(a.createdAt)
-      : a.createdAt.localeCompare(b.createdAt)
+    sortDesc ? b.createdAt.localeCompare(a.createdAt) : a.createdAt.localeCompare(b.createdAt)
   )
 
   async function handleStatusChange(newStatus: TaskStatus) {
@@ -228,21 +209,6 @@ function TaskDetailPanel({
       onUpdate(task.id, { description: descValue })
       setEditingDescription(false)
       toast.success("Descripción actualizada")
-    } catch {
-      toast.error("Error al actualizar")
-    }
-  }
-
-  async function handleSaveGuidelines() {
-    try {
-      await fetch(`/api/tasks/${task.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ guidelines: guidelinesValue }),
-      })
-      onUpdate(task.id, { guidelines: guidelinesValue })
-      setEditingGuidelines(false)
-      toast.success("Pautas actualizadas")
     } catch {
       toast.error("Error al actualizar")
     }
@@ -324,7 +290,7 @@ function TaskDetailPanel({
       <div className="overflow-hidden min-h-0">
         <div className="border-t border-l-4 border-l-primary/30 bg-primary/[0.02]">
 
-          {/* ── Header del panel ── */}
+          {/* Header del panel */}
           <div className="px-5 py-2.5 bg-muted/30 border-b flex items-center gap-3 flex-wrap">
             <span className="text-[10px] font-mono font-semibold text-muted-foreground">#{task.correlativeId}</span>
             <span className="text-[10px] text-muted-foreground/50">·</span>
@@ -345,7 +311,7 @@ function TaskDetailPanel({
                 </SelectContent>
               </Select>
               {activities.length > 0 && (
-                <div className="flex items-center gap-2 ml-1">
+                <div className="flex items-center gap-2">
                   <Progress value={progress} className="h-1.5 w-20" />
                   <span className={cn("text-xs font-semibold tabular-nums", progress === 100 ? "text-emerald-500" : "text-primary")}>
                     {progress}%
@@ -358,12 +324,11 @@ function TaskDetailPanel({
                     {u.name.charAt(0)}
                   </div>
                 ))}
-                {assignedUsers.length === 0 && <span className="text-xs text-muted-foreground/50 italic">Sin asignar</span>}
               </div>
             </div>
           </div>
 
-          {/* ── Tabs ── */}
+          {/* Tabs */}
           <Tabs defaultValue="detalles" className="flex flex-col">
             <TabsList className="w-full rounded-none border-b h-10 bg-transparent px-5 justify-start gap-1 shrink-0">
               <TabsTrigger value="detalles" className="text-xs h-8 px-3 data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none">
@@ -377,9 +342,8 @@ function TaskDetailPanel({
               </TabsTrigger>
             </TabsList>
 
-            {/* Tab: Detalles */}
+            {/* Detalles */}
             <TabsContent value="detalles" className="mt-0 px-5 py-4 space-y-5">
-
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label className="text-xs text-muted-foreground">Descripción</Label>
@@ -402,27 +366,12 @@ function TaskDetailPanel({
                 )}
               </div>
 
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
+              {task.guidelines && (
+                <div className="space-y-1.5">
                   <Label className="text-xs text-muted-foreground">Pautas de seguimiento</Label>
-                  <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={() => setEditingGuidelines(!editingGuidelines)}>
-                    <Pencil className="h-3 w-3" />
-                  </Button>
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">{task.guidelines}</p>
                 </div>
-                {editingGuidelines ? (
-                  <div className="space-y-2">
-                    <Textarea value={guidelinesValue} onChange={(e) => setGuidelinesValue(e.target.value)} rows={3} className="text-sm" placeholder="Instrucciones de seguimiento..." />
-                    <div className="flex gap-2 justify-end">
-                      <Button variant="outline" size="sm" onClick={() => setEditingGuidelines(false)}>Cancelar</Button>
-                      <Button size="sm" onClick={handleSaveGuidelines}>Guardar</Button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
-                    {task.guidelines || <span className="italic opacity-40">Sin pautas</span>}
-                  </p>
-                )}
-              </div>
+              )}
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
@@ -478,7 +427,7 @@ function TaskDetailPanel({
               </div>
             </TabsContent>
 
-            {/* Tab: Checklist */}
+            {/* Checklist */}
             <TabsContent value="checklist" className="mt-0 px-5 py-4">
               {activities.length > 0 && (
                 <div className="flex items-center gap-3 mb-4 p-3 rounded-lg bg-muted/30">
@@ -501,7 +450,7 @@ function TaskDetailPanel({
                       ? <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
                       : <Circle className="h-5 w-5 text-muted-foreground/40 shrink-0" />
                     }
-                    <span className={cn("text-sm flex-1 leading-snug", a.completed && "line-through text-muted-foreground/50")}>
+                    <span className={cn("text-sm flex-1", a.completed && "line-through text-muted-foreground/50")}>
                       {a.name}
                     </span>
                   </div>
@@ -522,7 +471,7 @@ function TaskDetailPanel({
               </div>
             </TabsContent>
 
-            {/* Tab: Comentarios */}
+            {/* Comentarios */}
             <TabsContent value="comentarios" className="mt-0 flex flex-col">
               <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
                 <p className="text-xs text-muted-foreground">{comments.length} comentario{comments.length !== 1 ? "s" : ""}</p>
@@ -568,14 +517,13 @@ function TaskDetailPanel({
               </div>
             </TabsContent>
           </Tabs>
-
         </div>
       </div>
     </div>
   )
 }
 
-// ─── Status Group ──────────────────────────────────────────────
+// ─── Status Group ───────────────────────────────────────────────
 function StatusGroup({
   status,
   tasks,
@@ -631,12 +579,9 @@ function StatusGroup({
                   )}
                   onClick={() => onToggleTask(task.id)}
                 >
-                  {/* Correlative ID */}
                   <span className="text-[10px] text-muted-foreground font-mono font-semibold shrink-0 w-8">
                     #{task.correlativeId}
                   </span>
-
-                  {/* Task info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className={cn("text-sm font-medium truncate", task.status === "finalizado" && "line-through text-muted-foreground")}>
@@ -663,8 +608,6 @@ function StatusGroup({
                       )}
                     </div>
                   </div>
-
-                  {/* Progress mini */}
                   {task.activities.length > 0 && (
                     <div className="w-12 shrink-0">
                       <div className="h-1.5 bg-muted rounded-full overflow-hidden">
@@ -675,20 +618,14 @@ function StatusGroup({
                       </div>
                     </div>
                   )}
-
-                  {/* Assignees */}
                   <div className="flex -space-x-1.5 shrink-0">
                     {assignedUsers.slice(0, 3).map((u) => (
-                      <div
-                        key={u.id}
-                        title={u.name}
-                        className="h-6 w-6 rounded-full bg-primary/10 border-2 border-background flex items-center justify-center text-[9px] font-bold text-primary"
-                      >
+                      <div key={u.id} title={u.name}
+                        className="h-6 w-6 rounded-full bg-primary/10 border-2 border-background flex items-center justify-center text-[9px] font-bold text-primary">
                         {u.name.charAt(0)}
                       </div>
                     ))}
                   </div>
-
                   <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform duration-200", isExpanded ? "rotate-180 text-primary" : "text-muted-foreground")} />
                 </div>
                 <TaskDetailPanel
@@ -714,36 +651,21 @@ function StatusGroup({
   )
 }
 
-// ─── Main Page ─────────────────────────────────────────────────
-export default function CoordinadorTareasPage() {
+// ─── Main Page ──────────────────────────────────────────────────
+export default function TrabajadorTareasPage() {
   const { user } = useAuth()
   const [projects, setProjects] = useState<Project[]>([])
   const [allUsers, setAllUsers] = useState<User[]>([])
   const [availableTags, setAvailableTags] = useState<Tag[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Filters
   const [filterProject, setFilterProject] = useState("all")
-  const [filterTag, setFilterTag] = useState("all")
-  const [filterUser, setFilterUser] = useState("all")
   const [search, setSearch] = useState("")
-
-  // Expanded task (inline panel)
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
 
-  // Create task dialog
   const [showCreate, setShowCreate] = useState(false)
-  const [createForm, setCreateForm] = useState({
-    name: "", description: "", projectId: "", assignedTo: [] as string[], tagIds: [] as string[],
-  })
+  const [createForm, setCreateForm] = useState({ name: "", description: "", projectId: "" })
   const [createLoading, setCreateLoading] = useState(false)
-
-  // Tag manager
-  const [showTagManager, setShowTagManager] = useState(false)
-  const [showExport, setShowExport] = useState(false)
-  const [newTagName, setNewTagName] = useState("")
-  const [newTagColor, setNewTagColor] = useState("#6366f1")
-  const [tagProjectId, setTagProjectId] = useState("")
 
   useEffect(() => {
     const load = async () => {
@@ -767,28 +689,22 @@ export default function CoordinadorTareasPage() {
     load()
   }, [])
 
-  const myProjects = projects.filter((p) => p.coordinatorId === user?.id || user?.role === "admin")
-  const workers = allUsers.filter((u) => u.active)
-  const selectedProject = myProjects.find((p) => p.id === createForm.projectId)
-  const workersForForm = allUsers.filter(
-    (u) => u.active && u.role === "trabajador" && (selectedProject?.assignedWorkers ?? []).includes(u.id)
+  // Projects where this worker is assigned
+  const myProjects = projects.filter((p) =>
+    (p.assignedWorkers ?? []).includes(user?.id ?? "")
   )
 
-  // All tasks with project info
+  // All tasks from my projects
   const allTasks = myProjects.flatMap((p) =>
     (p.tasks ?? []).map((t) => ({ ...t, _projectId: p.id, _projectName: p.name }))
   )
 
-  // Apply filters
   const filteredTasks = allTasks.filter((t) => {
     if (filterProject !== "all" && t._projectId !== filterProject) return false
-    if (filterTag !== "all" && !(t.tags ?? []).some((tag) => tag.id === filterTag)) return false
-    if (filterUser !== "all" && !t.assignedTo.includes(filterUser)) return false
     if (search && !t.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
 
-  // Group by status
   const tasksByStatus = STATUS_ORDER.reduce((acc, status) => {
     acc[status] = filteredTasks.filter((t) => t.status === status)
     return acc
@@ -798,7 +714,6 @@ export default function CoordinadorTareasPage() {
     setExpandedTaskId((prev) => prev === taskId ? null : taskId)
   }
 
-  // Update task in local state
   function handleTaskUpdate(taskId: string, updates: Partial<Task>) {
     setProjects((prev) =>
       prev.map((p) => ({
@@ -824,7 +739,7 @@ export default function CoordinadorTareasPage() {
       const res = await fetch(`/api/projects/${createForm.projectId}/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...createForm, createdBy: user.id }),
+        body: JSON.stringify({ name: createForm.name, description: createForm.description }),
       })
       if (!res.ok) {
         toast.error("Error al crear tarea")
@@ -840,28 +755,11 @@ export default function CoordinadorTareasPage() {
       )
       toast.success(`Tarea #${newTask.correlativeId} creada`)
       setShowCreate(false)
-      setCreateForm({ name: "", description: "", projectId: "", assignedTo: [], tagIds: [] })
+      setCreateForm({ name: "", description: "", projectId: "" })
     } catch {
       toast.error("Error al crear tarea")
     } finally {
       setCreateLoading(false)
-    }
-  }
-
-  async function handleCreateTag() {
-    if (!newTagName.trim() || !user) return
-    try {
-      const res = await fetch("/api/tags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newTagName.trim(), color: newTagColor, projectId: tagProjectId || null }),
-      })
-      const tag = await res.json()
-      setAvailableTags((prev) => [...prev, tag])
-      setNewTagName("")
-      toast.success("Etiqueta creada")
-    } catch {
-      toast.error("Error al crear etiqueta")
     }
   }
 
@@ -873,29 +771,17 @@ export default function CoordinadorTareasPage() {
     )
   }
 
-  const tagsForSelectedProject = availableTags.filter(
-    (t) => t.projectId === null || t.projectId === createForm.projectId
-  )
-
   return (
     <div className="space-y-5 page-enter">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">Gestión de Tareas</h1>
+          <h1 className="text-xl font-bold tracking-tight">Mis Tareas</h1>
           <p className="text-sm text-muted-foreground">{filteredTasks.length} tareas · {myProjects.length} proyectos</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setShowExport(true)}>
-            <Download className="h-4 w-4 mr-1" /> Exportar
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setShowTagManager(true)}>
-            <TagIcon className="h-4 w-4 mr-1" /> Etiquetas
-          </Button>
-          <Button size="sm" onClick={() => setShowCreate(true)}>
-            <Plus className="h-4 w-4 mr-1" /> Nueva tarea
-          </Button>
-        </div>
+        <Button size="sm" onClick={() => setShowCreate(true)} disabled={myProjects.length === 0}>
+          <Plus className="h-4 w-4 mr-1" /> Nueva tarea
+        </Button>
       </div>
 
       {/* Filters */}
@@ -905,51 +791,35 @@ export default function CoordinadorTareasPage() {
           <Input placeholder="Buscar tarea..." className="pl-9 h-9" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <Select value={filterProject} onValueChange={setFilterProject}>
-          <SelectTrigger className="w-[180px] h-9"><SelectValue placeholder="Proyecto" /></SelectTrigger>
+          <SelectTrigger className="w-[200px] h-9"><SelectValue placeholder="Proyecto" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos los proyectos</SelectItem>
             {myProjects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={filterTag} onValueChange={setFilterTag}>
-          <SelectTrigger className="w-[150px] h-9"><SelectValue placeholder="Etiqueta" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas las etiquetas</SelectItem>
-            {availableTags.map((tag) => (
-              <SelectItem key={tag.id} value={tag.id}>
-                <span className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: tag.color }} />
-                  {tag.name}
-                </span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={filterUser} onValueChange={setFilterUser}>
-          <SelectTrigger className="w-[160px] h-9"><SelectValue placeholder="Usuario" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            {workers.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
       </div>
 
-      {/* Task board grouped by status */}
-      <div className="space-y-3">
-        {STATUS_ORDER.map((status) => (
-          <StatusGroup
-            key={status}
-            status={status}
-            tasks={tasksByStatus[status]}
-            allUsers={allUsers}
-            availableTags={availableTags}
-            expandedTaskId={expandedTaskId}
-            onToggleTask={handleToggleTask}
-            onUpdate={handleTaskUpdate}
-            onTagsUpdate={handleTagsUpdate}
-          />
-        ))}
-      </div>
+      {myProjects.length === 0 ? (
+        <div className="rounded-lg border bg-card p-12 text-center">
+          <p className="text-muted-foreground text-sm">No estás asignado a ningún proyecto actualmente.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {STATUS_ORDER.map((status) => (
+            <StatusGroup
+              key={status}
+              status={status}
+              tasks={tasksByStatus[status]}
+              allUsers={allUsers}
+              availableTags={availableTags}
+              expandedTaskId={expandedTaskId}
+              onToggleTask={handleToggleTask}
+              onUpdate={handleTaskUpdate}
+              onTagsUpdate={handleTagsUpdate}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Create Task Dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
@@ -958,7 +828,10 @@ export default function CoordinadorTareasPage() {
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label>Proyecto *</Label>
-              <Select value={createForm.projectId} onValueChange={(v) => setCreateForm((f) => ({ ...f, projectId: v, tagIds: [], assignedTo: [] }))}>
+              <Select
+                value={createForm.projectId}
+                onValueChange={(v) => setCreateForm((f) => ({ ...f, projectId: v }))}
+              >
                 <SelectTrigger><SelectValue placeholder="Seleccionar proyecto" /></SelectTrigger>
                 <SelectContent>
                   {myProjects.filter((p) => p.status === "Activo").map((p) => (
@@ -969,122 +842,29 @@ export default function CoordinadorTareasPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Título *</Label>
-              <Input value={createForm.name} onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ej: Revisión de planos" />
+              <Input
+                value={createForm.name}
+                onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="Ej: Revisión de planos"
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Descripción</Label>
-              <Textarea value={createForm.description} onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))} rows={2} />
+              <Textarea
+                value={createForm.description}
+                onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
+                rows={2}
+              />
             </div>
-            <div className="space-y-1.5">
-              <Label>Asignar a</Label>
-              <div className="flex flex-wrap gap-2">
-                {workersForForm.map((w) => {
-                  const selected = createForm.assignedTo.includes(w.id)
-                  return (
-                    <button
-                      key={w.id}
-                      onClick={() => setCreateForm((f) => ({
-                        ...f,
-                        assignedTo: selected ? f.assignedTo.filter((u) => u !== w.id) : [...f.assignedTo, w.id],
-                      }))}
-                      className={cn(
-                        "flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border transition-colors",
-                        selected ? "bg-primary/10 border-primary/30 text-primary" : "bg-muted/50 border-border text-muted-foreground"
-                      )}
-                    >
-                      {w.name.split(" ")[0]}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-            {createForm.projectId && tagsForSelectedProject.length > 0 && (
-              <div className="space-y-1.5">
-                <Label>Etiquetas</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {tagsForSelectedProject.map((tag) => {
-                    const selected = createForm.tagIds.includes(tag.id)
-                    return (
-                      <button
-                        key={tag.id}
-                        onClick={() => setCreateForm((f) => ({
-                          ...f,
-                          tagIds: selected ? f.tagIds.filter((id) => id !== tag.id) : [...f.tagIds, tag.id],
-                        }))}
-                        className={cn("rounded-full px-2.5 py-1 text-[10px] font-medium text-white transition-opacity", !selected && "opacity-40")}
-                        style={{ backgroundColor: tag.color }}
-                      >
-                        {tag.name}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button>
-            <Button onClick={handleCreateTask} disabled={!createForm.name.trim() || !createForm.projectId || createLoading}>
+            <Button
+              onClick={handleCreateTask}
+              disabled={!createForm.name.trim() || !createForm.projectId || createLoading}
+            >
               {createLoading ? "Creando..." : "Crear tarea"}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <ExportDialog
-        open={showExport}
-        onOpenChange={setShowExport}
-        context="tasks"
-        filters={{ projectId: filterProject }}
-        data={allTasks as unknown as Record<string, unknown>[]}
-        projects={myProjects.map((p) => ({ id: p.id, name: p.name }))}
-      />
-
-      {/* Tag Manager Dialog */}
-      <Dialog open={showTagManager} onOpenChange={setShowTagManager}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Gestión de Etiquetas</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Crear nueva etiqueta</Label>
-              <div className="flex gap-2">
-                <Input
-                  value={newTagName}
-                  onChange={(e) => setNewTagName(e.target.value)}
-                  placeholder="Nombre de la etiqueta"
-                  className="flex-1"
-                />
-                <input
-                  type="color"
-                  value={newTagColor}
-                  onChange={(e) => setNewTagColor(e.target.value)}
-                  className="h-10 w-10 rounded border cursor-pointer"
-                />
-                <Button onClick={handleCreateTag} disabled={!newTagName.trim()} size="sm" className="h-10">
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Proyecto (opcional — dejar vacío para global)</Label>
-                <Select value={tagProjectId} onValueChange={setTagProjectId}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Global (todos los proyectos)" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">Global</SelectItem>
-                    {myProjects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Etiquetas existentes</Label>
-              <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
-                {availableTags.map((tag) => <TagBadge key={tag.id} tag={tag} />)}
-                {availableTags.length === 0 && <span className="text-xs text-muted-foreground/50">Sin etiquetas</span>}
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setShowTagManager(false)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

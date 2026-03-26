@@ -190,7 +190,7 @@ export async function POST(
         .from(tags)
         .where(inArray(tags.id, tagIds))
 
-      const validTags = existingTags.filter((tag) => tag.projectId === context.projectId)
+      const validTags = existingTags.filter((tag) => tag.projectId === context.projectId || tag.projectId === null)
 
       if (validTags.length !== tagIds.length) {
         return NextResponse.json(
@@ -204,36 +204,33 @@ export async function POST(
 
     for (let attempt = 1; attempt <= MAX_CORRELATIVE_RETRIES; attempt += 1) {
       try {
-        newTask = await db.transaction(async (tx) => {
-          const maxResult = await tx
-            .select({ maxId: max(tasks.correlativeId) })
-            .from(tasks)
-            .where(eq(tasks.projectId, context.projectId))
-          const nextCorrelativeId = (maxResult[0]?.maxId ?? 0) + 1
+        const maxResult = await db
+          .select({ maxId: max(tasks.correlativeId) })
+          .from(tasks)
+          .where(eq(tasks.projectId, context.projectId))
+        const nextCorrelativeId = (maxResult[0]?.maxId ?? 0) + 1
 
-          const [createdTask] = await tx
-            .insert(tasks)
-            .values({
-              ...taskValues,
-              correlativeId: nextCorrelativeId,
-            })
-            .returning()
+        const [createdTask] = await db
+          .insert(tasks)
+          .values({
+            ...taskValues,
+            correlativeId: nextCorrelativeId,
+          })
+          .returning()
 
-          if (assignedTo.length > 0) {
-            await tx.insert(taskAssignments).values(
-              assignedTo.map((userId) => ({ taskId: createdTask.id, userId }))
-            )
-          }
+        if (assignedTo.length > 0) {
+          await db.insert(taskAssignments).values(
+            assignedTo.map((userId) => ({ taskId: createdTask.id, userId }))
+          )
+        }
 
-          if (tagIds.length > 0) {
-            await tx.insert(taskTags).values(
-              tagIds.map((tagId) => ({ taskId: createdTask.id, tagId }))
-            )
-          }
+        if (tagIds.length > 0) {
+          await db.insert(taskTags).values(
+            tagIds.map((tagId) => ({ taskId: createdTask.id, tagId }))
+          )
+        }
 
-          return createdTask
-        })
-
+        newTask = createdTask
         break
       } catch (error) {
         if (attempt < MAX_CORRELATIVE_RETRIES && isCorrelativeConflict(error)) {

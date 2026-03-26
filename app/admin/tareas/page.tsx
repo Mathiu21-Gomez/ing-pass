@@ -743,6 +743,10 @@ export default function AdminTareasPage() {
 
   const coordinators = allUsers.filter((u) => u.role === "coordinador" && u.active)
   const workers = allUsers.filter((u) => u.active)
+  const selectedProject = projects.find((p) => p.id === createForm.projectId)
+  const workersForForm = allUsers.filter(
+    (u) => u.active && u.role === "trabajador" && (selectedProject?.assignedWorkers ?? []).includes(u.id)
+  )
 
   // All tasks with project + coordinator info
   const allTasks = projects.flatMap((p) =>
@@ -814,7 +818,10 @@ export default function AdminTareasPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...createForm, createdBy: user.id }),
       })
-      if (!res.ok) throw new Error()
+      if (!res.ok) {
+        toast.error("Error al crear tarea")
+        return
+      }
       const newTask = await res.json()
       setProjects((prev) =>
         prev.map((p) =>
@@ -1013,7 +1020,7 @@ export default function AdminTareasPage() {
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label>Proyecto *</Label>
-              <Select value={createForm.projectId} onValueChange={(v) => setCreateForm((f) => ({ ...f, projectId: v, tagIds: [] }))}>
+              <Select value={createForm.projectId} onValueChange={(v) => setCreateForm((f) => ({ ...f, projectId: v, tagIds: [], assignedTo: [] }))}>
                 <SelectTrigger><SelectValue placeholder="Seleccionar proyecto" /></SelectTrigger>
                 <SelectContent>
                   {projects.filter((p) => p.status === "Activo").map((p) => (
@@ -1033,7 +1040,7 @@ export default function AdminTareasPage() {
             <div className="space-y-1.5">
               <Label>Asignar a</Label>
               <div className="flex flex-wrap gap-2">
-                {workers.map((w) => {
+                {workersForForm.map((w) => {
                   const selected = createForm.assignedTo.includes(w.id)
                   return (
                     <button
