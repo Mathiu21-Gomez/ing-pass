@@ -120,8 +120,9 @@ export const taskSchema = z.object({
         .max(100, "El nombre no puede exceder 100 caracteres"),
     description: z
         .string()
-        .min(5, "La descripción debe tener al menos 5 caracteres")
-        .max(300, "La descripción no puede exceder 300 caracteres"),
+        .max(300, "La descripción no puede exceder 300 caracteres")
+        .optional()
+        .or(z.literal("")),
     dueDate: z.string().optional().or(z.literal("")),
 })
 
