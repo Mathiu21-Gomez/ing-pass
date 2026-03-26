@@ -109,15 +109,9 @@ export async function POST(
     const { context, error: accessError } = await getProjectAccessContext(projectId, authUser)
     if (accessError) return accessError
 
-    if (authUser.role === "trabajador") {
-      return NextResponse.json(
-        { error: "Sin permisos suficientes" },
-        { status: 403 }
-      )
-    }
-
     const body = await request.json()
     const parsed = taskSchema.safeParse(body)
+    const isWorkerRequester = authUser.role === "trabajador"
 
     if (!parsed.success) {
       return NextResponse.json(
@@ -126,7 +120,7 @@ export async function POST(
       )
     }
 
-    if (body.assignedTo !== undefined && !isStringArray(body.assignedTo)) {
+    if (!isWorkerRequester && body.assignedTo !== undefined && !isStringArray(body.assignedTo)) {
       return NextResponse.json(
         { error: "assignedTo debe ser un array de strings" },
         { status: 400 }
@@ -140,7 +134,9 @@ export async function POST(
       )
     }
 
-    const assignedTo = uniqueStrings(body.assignedTo ?? [])
+    const assignedTo = isWorkerRequester
+      ? [authUser.id]
+      : uniqueStrings(body.assignedTo ?? [])
     const tagIds = uniqueStrings(body.tagIds ?? [])
     const createdBy: string = authUser.id
     const isExternalRequester = authUser.role === "externo"

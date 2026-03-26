@@ -54,6 +54,7 @@ import { toast } from "sonner"
 import { ImageUpload } from "@/components/image-upload"
 import { ChatPanel } from "@/components/chat-panel"
 import type { CommentAttachment } from "@/lib/types"
+import { canCreateWorkdayTask, getWorkdayTaskCreationHint } from "@/lib/workday-task-permissions"
 
 // ── Task change entry (for logging task switches during the day) ──
 interface TaskChange {
@@ -151,6 +152,8 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
 
   const selectedProject = allProjects.find((p) => p.id === selectedProjectId)
   const selectedTask = selectedProject?.tasks.find((t) => t.id === selectedTaskId)
+  const canCreateTask = canCreateWorkdayTask(user?.role)
+  const createTaskHint = getWorkdayTaskCreationHint(user?.role)
 
   // Available tasks for the selected project (open tasks only)
   const availableTasks = selectedProject?.tasks.filter((t) => t.status !== "finalizado") ?? []
@@ -212,6 +215,10 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
   // ─── Create task ─────────────────────────
   async function handleCreateTask() {
     if (!newTaskName.trim() || !selectedProjectId || !user) return
+    if (!canCreateTask) {
+      toast.error("No tenes permisos para crear tareas")
+      return
+    }
 
     try {
       const created = await projectsApi.createTask(selectedProjectId, {
@@ -502,7 +509,7 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
               )}
 
               {/* Create task button */}
-              {selectedProjectId && (
+              {selectedProjectId && canCreateTask && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -917,6 +924,7 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
                 className="text-sm resize-none"
               />
             </div>
+            <p className="text-xs text-muted-foreground">{createTaskHint}</p>
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setShowCreateTaskDialog(false)}>Cancelar</Button>

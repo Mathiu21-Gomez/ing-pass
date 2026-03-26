@@ -133,10 +133,45 @@ describe("/api/projects/[id]/tasks hardening", () => {
     expect(res.status).toBe(404)
   })
 
-  it("returns 403 when a worker tries to create tasks in a project", async () => {
+  it("allows a worker to create tasks only for themselves", async () => {
     vi.mocked(getAuthUser).mockResolvedValue({
       user: makeUser("trabajador", "worker-1"),
       error: null,
+    } as never)
+
+    selectQueue = [[{ userId: "worker-1" }], [{ maxId: 2 }]]
+
+    const res = await POST(
+      new NextRequest("http://localhost/api/projects/project-1/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Nueva tarea",
+          description: "Descripcion valida",
+          assignedTo: ["worker-2"],
+          createdBy: "otro-usuario",
+        }),
+      }),
+      makeParams()
+    )
+    const body = await res.json()
+    const assignmentInsert = insertedValues[1] as Array<Record<string, string>>
+
+    expect(res.status).toBe(201)
+    expect(body.assignedTo).toEqual(["worker-1"])
+    expect(body.createdBy).toBe("worker-1")
+    expect(assignmentInsert).toEqual([{ taskId: "task-created", userId: "worker-1" }])
+  })
+
+  it("keeps project membership enforcement for workers", async () => {
+    vi.mocked(getAuthUser).mockResolvedValue({
+      user: makeUser("trabajador", "worker-1"),
+      error: null,
+    } as never)
+
+    vi.mocked(getProjectAccessContext).mockResolvedValue({
+      context: null,
+      error: new Response(JSON.stringify({ error: "Proyecto no encontrado" }), { status: 404 }),
     } as never)
 
     const res = await POST(
@@ -146,12 +181,14 @@ describe("/api/projects/[id]/tasks hardening", () => {
         body: JSON.stringify({
           name: "Nueva tarea",
           description: "Descripcion valida",
+          assignedTo: ["worker-2"],
         }),
       }),
       makeParams()
     )
 
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(404)
+    expect(insertedValues).toHaveLength(0)
   })
 
   it("rejects assignees outside the project", async () => {
