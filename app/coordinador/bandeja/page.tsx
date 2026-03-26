@@ -38,15 +38,17 @@ interface ConversationGroup {
   unread: number
 }
 
+const INBOX_REFRESH_INTERVAL_MS = 5_000
+
 export default function CoordinadorBandejaPage() {
   const { user } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedGroup, setSelectedGroup] = useState<ConversationGroup | null>(null)
+  const [selectedGroupKey, setSelectedGroupKey] = useState<string | null>(null)
 
   const fetchMessages = useCallback(async () => {
     try {
-      const res = await fetch("/api/messages")
+      const res = await fetch("/api/messages", { cache: "no-store" })
       if (!res.ok) throw new Error()
       const data: Message[] = await res.json()
       setMessages(data)
@@ -59,7 +61,7 @@ export default function CoordinadorBandejaPage() {
 
   useEffect(() => {
     fetchMessages()
-    const interval = setInterval(fetchMessages, 20_000)
+    const interval = setInterval(fetchMessages, INBOX_REFRESH_INTERVAL_MS)
     return () => clearInterval(interval)
   }, [fetchMessages])
 
@@ -101,9 +103,10 @@ export default function CoordinadorBandejaPage() {
 
   const workerGroups = buildGroups(workerChats)
   const clientGroups = buildGroups(clientChats)
+  const selectedGroup = [...workerGroups, ...clientGroups].find((group) => group.key === selectedGroupKey) ?? null
 
   async function handleSelectGroup(g: ConversationGroup) {
-    setSelectedGroup(g)
+    setSelectedGroupKey(g.key)
     // Optimistic update
     const now = new Date().toISOString()
     setMessages(prev =>
@@ -143,7 +146,7 @@ export default function CoordinadorBandejaPage() {
             onClick={() => handleSelectGroup(g)}
             className={cn(
               "flex items-start gap-3 rounded-lg px-3 py-3 text-left transition-colors",
-              selectedGroup?.key === g.key
+              selectedGroupKey === g.key
                 ? "bg-primary/10 text-primary"
                 : "hover:bg-muted/50"
             )}

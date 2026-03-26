@@ -29,6 +29,8 @@ interface Message {
   createdAt: string
 }
 
+const CHAT_REFRESH_INTERVAL_MS = 5_000
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 const AVATAR_COLORS = [
@@ -91,7 +93,7 @@ export function ChatPanel({
       else if (sessionId) params.set("sessionId", sessionId)
       else if (projectId) params.set("projectId", projectId)
 
-      const res = await fetch(`/api/messages?${params}`)
+      const res = await fetch(`/api/messages?${params}`, { cache: "no-store" })
       if (!res.ok) throw new Error()
       const data: Message[] = await res.json()
       setMessages(data)
@@ -104,11 +106,9 @@ export function ChatPanel({
 
   useEffect(() => {
     fetchMessages()
-    // Only poll for session/project chats — task chats are async discussions
-    if (taskId) return
-    const interval = setInterval(fetchMessages, 15_000)
+    const interval = setInterval(fetchMessages, CHAT_REFRESH_INTERVAL_MS)
     return () => clearInterval(interval)
-  }, [fetchMessages, taskId])
+  }, [fetchMessages])
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
