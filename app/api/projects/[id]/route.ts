@@ -14,6 +14,19 @@ import { projectSchema } from "@/lib/schemas"
 import { and, eq } from "drizzle-orm"
 import { getAuthUser, requireRole } from "@/lib/api-auth"
 
+function toProjectResponse<T extends Record<string, unknown>>(
+  project: T,
+  assignedWorkers: string[]
+) {
+  return {
+    ...project,
+    assignedWorkers,
+    tasks: [],
+    documents: [],
+    urls: [],
+  }
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -173,7 +186,7 @@ export async function PATCH(
       )
     }
 
-    return NextResponse.json({ ...updated[0], assignedWorkers })
+    return NextResponse.json(toProjectResponse(updated[0], assignedWorkers))
   } catch (error) {
     console.error("Error updating project:", error)
     return NextResponse.json(

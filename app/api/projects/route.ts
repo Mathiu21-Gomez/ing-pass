@@ -14,6 +14,19 @@ import { projectSchema } from "@/lib/schemas"
 import { eq, inArray } from "drizzle-orm"
 import { getAuthUser, requireRole } from "@/lib/api-auth"
 
+function toProjectResponse<T extends Record<string, unknown>>(
+  project: T,
+  assignedWorkers: string[]
+) {
+  return {
+    ...project,
+    assignedWorkers,
+    tasks: [],
+    documents: [],
+    urls: [],
+  }
+}
+
 export async function GET(request: NextRequest) {
   const { user: authUser, error } = await getAuthUser(request)
   if (error) return error
@@ -274,10 +287,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    return NextResponse.json(
-      { ...newProject, assignedWorkers },
-      { status: 201 }
-    )
+    return NextResponse.json(toProjectResponse(newProject, assignedWorkers), {
+      status: 201,
+    })
   } catch (error) {
     console.error("Error creating project:", error)
     return NextResponse.json(
