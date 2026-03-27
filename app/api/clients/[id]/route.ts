@@ -90,6 +90,17 @@ export async function PATCH(
 
     return NextResponse.json(updated[0])
   } catch (error) {
+    const isUniqueViolation =
+      typeof error === "object" && error !== null &&
+      "code" in error && (error as { code: string }).code === "23505"
+
+    if (isUniqueViolation) {
+      return NextResponse.json(
+        { error: "Ya existe un cliente con ese RUT" },
+        { status: 409 }
+      )
+    }
+
     console.error("Error updating client:", error)
     return NextResponse.json(
       { error: "Error al actualizar cliente" },

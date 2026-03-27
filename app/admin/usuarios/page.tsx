@@ -6,7 +6,8 @@ import { useApiData } from "@/hooks/use-api-data"
 import type { User, UserRole, DaySchedule } from "@/lib/types"
 import { DAY_LABELS } from "@/lib/types"
 import { useCrud } from "@/hooks/use-crud"
-import { userSchema, formatZodErrors } from "@/lib/schemas"
+import { userSchema, createUserSchema, formatZodErrors } from "@/lib/schemas"
+import { useAuth } from "@/lib/contexts/auth-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -25,7 +26,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { Plus, Pencil, Search, Clock } from "lucide-react"
+import { Plus, Pencil, Search, Clock, Eye, EyeOff } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import {
@@ -39,6 +40,7 @@ import {
 } from "@/components/ui/table"
 
 export default function UsuariosPage() {
+  const { user: currentUser, refreshSession } = useAuth()
   const fetchUsers = useCallback(() => usersApi.getAll(), [])
   const { data: apiUsers } = useApiData(fetchUsers, [] as User[])
   const crud = useCrud<User>(apiUsers, {
@@ -52,7 +54,8 @@ export default function UsuariosPage() {
     reason: "",
   }))
 
-  const [form, setForm] = useState({ name: "", email: "", emailPersonal: "", role: "trabajador" as UserRole, position: "", active: true, scheduleType: "fijo" as "fijo" | "libre" })
+  const [form, setForm] = useState({ name: "", email: "", emailPersonal: "", role: "trabajador" as UserRole, position: "", active: true, scheduleType: "fijo" as "fijo" | "libre", password: "", confirmPassword: "" })
+  const [showPassword, setShowPassword] = useState(false)
   const [schedule, setSchedule] = useState<DaySchedule[]>(DEFAULT_SCHEDULE)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
@@ -63,7 +66,8 @@ export default function UsuariosPage() {
   }
 
   function openNew() {
-    setForm({ name: "", email: "", emailPersonal: "", role: "trabajador", position: "", active: true, scheduleType: "fijo" })
+    setForm({ name: "", email: "", emailPersonal: "", role: "trabajador", position: "", active: true, scheduleType: "fijo", password: "", confirmPassword: "" })
+    setShowPassword(false)
     setSchedule(DEFAULT_SCHEDULE)
     setErrors({})
     crud.openCreate()
@@ -78,6 +82,8 @@ export default function UsuariosPage() {
       position: user.position,
       active: user.active,
       scheduleType: user.scheduleType,
+      password: "",
+      confirmPassword: "",
     })
     setSchedule(user.weeklySchedule.length > 0 ? user.weeklySchedule : DEFAULT_SCHEDULE)
     setErrors({})
@@ -85,28 +91,52 @@ export default function UsuariosPage() {
   }
 
   async function handleSave() {
-    const result = userSchema.safeParse(form)
-    if (!result.success) {
-      setErrors(formatZodErrors(result.error))
-      toast.error("Corrige los errores del formulario")
-      return
+    const { password, confirmPassword, ...baseFields } = form
+
+    if (crud.editing) {
+      const result = userSchema.safeParse(baseFields)
+      if (!result.success) {
+        setErrors(formatZodErrors(result.error))
+        toast.error("Corrige los errores del formulario")
+        return
+      }
+    } else {
+      if (password !== confirmPassword) {
+        setErrors((prev) => ({ ...prev, confirmPassword: "Las contraseñas no coinciden" }))
+        toast.error("Las contraseñas no coinciden")
+        return
+      }
+      const result = createUserSchema.safeParse({ ...baseFields, password })
+      if (!result.success) {
+        setErrors(formatZodErrors(result.error))
+        toast.error("Corrige los errores del formulario")
+        return
+      }
     }
 
-    const payload = { ...form, weeklySchedule: schedule }
+    setErrors({})
+
+    const payload = crud.editing
+      ? { ...baseFields, weeklySchedule: schedule }
+      : { ...baseFields, password, weeklySchedule: schedule }
 
     try {
       if (crud.editing) {
-        const updated = await usersApi.update(crud.editing.id, payload)
+        const updated = await usersApi.update(crud.editing.id, payload as Partial<User>)
         crud.update(crud.editing.id, updated)
         toast.success("Usuario actualizado")
+        if (crud.editing.id === currentUser?.id) {
+          await refreshSession()
+        }
       } else {
-        const newUser = await usersApi.create(payload as Omit<User, "id">)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const newUser = await usersApi.create(payload as any)
         crud.add(newUser)
         toast.success("Usuario creado")
       }
       crud.closeDialog()
-    } catch {
-      toast.error("Error al guardar usuario")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al guardar usuario")
     }
   }
 
@@ -278,11 +308,11 @@ export default function UsuariosPage() {
       </div>
 
       <Dialog open={crud.dialogOpen} onOpenChange={crud.setDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>{crud.editing ? "Editar Usuario" : "Nuevo Usuario"}</DialogTitle>
           </DialogHeader>
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 max-h-[65vh] overflow-y-auto pr-1">
             <div className="flex flex-col gap-1.5">
               <Label>Nombre completo *</Label>
               <Input
@@ -313,6 +343,41 @@ export default function UsuariosPage() {
               />
               {errors.emailPersonal && <p className="text-xs text-destructive">{errors.emailPersonal}</p>}
             </div>
+            {!crud.editing && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <Label>Contraseña *</Label>
+                  <div className="relative">
+                    <Input
+                      type={showPassword ? "text" : "password"}
+                      value={form.password}
+                      onChange={(e) => setForm({ ...form, password: e.target.value })}
+                      placeholder="Mínimo 8 caracteres"
+                      className={errors.password ? "border-destructive pr-9" : "pr-9"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  {errors.password && <p className="text-xs text-destructive">{errors.password}</p>}
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Confirmar contraseña *</Label>
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    value={form.confirmPassword}
+                    onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
+                    placeholder="Repetir contraseña"
+                    className={errors.confirmPassword ? "border-destructive" : ""}
+                  />
+                  {errors.confirmPassword && <p className="text-xs text-destructive">{errors.confirmPassword}</p>}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
                 <Label>Cargo *</Label>

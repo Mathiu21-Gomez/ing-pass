@@ -4,7 +4,7 @@ import { NextRequest } from "next/server"
 let mockSelectRows: Array<{ id: string; projectId: string | null }> = []
 let insertedValues: unknown[] = []
 let deleteWhereCalls = 0
-let transactionCalls = 0
+let batchCalls = 0
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthUser: vi.fn(),
@@ -38,11 +38,6 @@ vi.mock("@/db", () => {
       }),
     }))
 
-  const createTransactionClient = () => ({
-    delete: createDeleteMock(),
-    insert: createInsertMock(),
-  })
-
   return {
     db: {
       select: vi.fn(() => ({
@@ -52,9 +47,9 @@ vi.mock("@/db", () => {
       })),
       insert: createInsertMock(),
       delete: createDeleteMock(),
-      transaction: vi.fn(async (callback: (tx: ReturnType<typeof createTransactionClient>) => Promise<unknown>) => {
-        transactionCalls += 1
-        return callback(createTransactionClient())
+      batch: vi.fn(async (queries: Promise<unknown>[]) => {
+        batchCalls += 1
+        return Promise.all(queries)
       }),
     },
   }
@@ -80,7 +75,7 @@ describe("/api/tasks/[id] subroutes hardening", () => {
     mockSelectRows = []
     insertedValues = []
     deleteWhereCalls = 0
-    transactionCalls = 0
+    batchCalls = 0
 
     vi.mocked(getAuthUser).mockResolvedValue({
       user: makeUser("admin", "admin-1"),
@@ -133,10 +128,10 @@ describe("/api/tasks/[id] subroutes hardening", () => {
     expect(res.status).toBe(400)
     expect(body.error).toMatch(/no pertenecen al proyecto/i)
     expect(deleteWhereCalls).toBe(0)
-    expect(transactionCalls).toBe(0)
+    expect(batchCalls).toBe(0)
   })
 
-  it("replaces task tags inside a single transaction", async () => {
+  it("replaces task tags inside a single Neon batch", async () => {
     mockSelectRows = [{ id: "tag-1", projectId: "project-1" }]
 
     const req = new NextRequest("http://localhost/api/tasks/task-1/tags", {
@@ -148,7 +143,7 @@ describe("/api/tasks/[id] subroutes hardening", () => {
     const res = await putTags(req, { params: Promise.resolve({ id: "task-1" }) })
 
     expect(res.status).toBe(200)
-    expect(transactionCalls).toBe(1)
+    expect(batchCalls).toBe(1)
     expect(deleteWhereCalls).toBe(1)
     expect(insertedValues).toEqual([[{ taskId: "task-1", tagId: "tag-1" }]])
   })

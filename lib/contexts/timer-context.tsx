@@ -12,6 +12,13 @@ import {
 import type { TimerStatus, HourlyProgress, TimeEntry } from "@/lib/types"
 import { timeEntriesApi } from "@/lib/services/api"
 import { useAuth } from "@/lib/contexts/auth-context"
+import {
+  getTimerStorageKey,
+  isActiveTimerStatus,
+  isValidTimerSnapshot,
+  restoreTimerState,
+  type TimerSnapshot,
+} from "@/lib/contexts/timer-context-persistence"
 
 interface TimerState {
   status: TimerStatus
@@ -117,6 +124,7 @@ const INITIAL_TIMER_STATE: TimerState = {
 export function TimerProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const [state, setState] = useState<TimerState>(INITIAL_TIMER_STATE)
+  const [hasHydratedSnapshot, setHasHydratedSnapshot] = useState(false)
 
   const [scheduleEndTime, setScheduleEndTime] = useState<string | null>(null)
   const stateRef = useRef<TimerState>(state)
@@ -126,6 +134,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   const endWarningShown = useRef(false)
   const autoEndShown = useRef(false)
   const hourMilestonesShown = useRef<Set<number>>(new Set())
+  const hydratedUserIdRef = useRef<string | null>(null)
 
   // Store timestamps for accurate calculation
   const workStartTimestamp = useRef<number | null>(null)
@@ -143,6 +152,8 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     const incoming = user?.id ?? null
     if (prevUserIdRef.current !== incoming) {
       prevUserIdRef.current = incoming
+      hydratedUserIdRef.current = null
+      setHasHydratedSnapshot(false)
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
         intervalRef.current = null
@@ -221,6 +232,115 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     if (intervalRef.current) clearInterval(intervalRef.current)
     intervalRef.current = setInterval(tick, 1000)
   }, [tick])
+
+  useEffect(() => {
+    if (!user?.id || hydratedUserIdRef.current === user.id) return
+
+    const storageKey = getTimerStorageKey(user.id)
+
+    try {
+      const rawSnapshot = window.localStorage.getItem(storageKey)
+
+      if (!rawSnapshot) {
+        hydratedUserIdRef.current = user.id
+        setHasHydratedSnapshot(true)
+        return
+      }
+
+      const parsedSnapshot: unknown = JSON.parse(rawSnapshot)
+      if (!isValidTimerSnapshot(parsedSnapshot, user.id)) {
+        window.localStorage.removeItem(storageKey)
+        hydratedUserIdRef.current = user.id
+        setHasHydratedSnapshot(true)
+        return
+      }
+
+      const restoredState = restoreTimerState(parsedSnapshot)
+
+      workStartTimestamp.current = parsedSnapshot.workStartTimestamp
+      totalPausedMs.current = parsedSnapshot.totalPausedMs
+      totalLunchMs.current = parsedSnapshot.totalLunchMs
+      lunchAlertShown.current = parsedSnapshot.lunchAlertShown
+      endWarningShown.current = parsedSnapshot.endWarningShown
+      autoEndShown.current = parsedSnapshot.autoEndShown
+      hourMilestonesShown.current = new Set(parsedSnapshot.hourMilestonesShown)
+
+      setScheduleEndTime(parsedSnapshot.scheduleEndTime)
+      setState(restoredState)
+      hydratedUserIdRef.current = user.id
+      setHasHydratedSnapshot(true)
+
+      if (parsedSnapshot.state.status === "trabajando") {
+        startInterval()
+      }
+    } catch {
+      window.localStorage.removeItem(storageKey)
+      hydratedUserIdRef.current = user.id
+      setHasHydratedSnapshot(true)
+    }
+  }, [user?.id, startInterval])
+
+  useEffect(() => {
+    if (!user?.id || hydratedUserIdRef.current !== user.id || !hasHydratedSnapshot) return
+
+    const storageKey = getTimerStorageKey(user.id)
+
+    if (!isActiveTimerStatus(state.status) || state.userId !== user.id) {
+      window.localStorage.removeItem(storageKey)
+      return
+    }
+
+    const snapshot: TimerSnapshot = {
+      version: 1,
+      userId: user.id,
+      scheduleEndTime,
+      workStartTimestamp: workStartTimestamp.current,
+      totalPausedMs: totalPausedMs.current,
+      totalLunchMs: totalLunchMs.current,
+      lunchAlertShown: lunchAlertShown.current,
+      endWarningShown: endWarningShown.current,
+      autoEndShown: autoEndShown.current,
+      hourMilestonesShown: Array.from(hourMilestonesShown.current),
+      state: {
+        status: state.status,
+        elapsedWorkSeconds: state.elapsedWorkSeconds,
+        elapsedLunchSeconds: state.elapsedLunchSeconds,
+        elapsedPauseSeconds: state.elapsedPauseSeconds,
+        elapsedMeetingSeconds: state.elapsedMeetingSeconds,
+        startTime: state.startTime?.toISOString() ?? null,
+        lunchStartTime: state.lunchStartTime?.toISOString() ?? null,
+        lunchEndTime: state.lunchEndTime?.toISOString() ?? null,
+        pauseStartTime: state.pauseStartTime?.toISOString() ?? null,
+        meetingStartTime: state.meetingStartTime?.toISOString() ?? null,
+        userId: state.userId,
+        currentProjectId: state.currentProjectId,
+        currentTaskId: state.currentTaskId,
+        showLunchAlert: state.showLunchAlert,
+        showEndWarning: state.showEndWarning,
+        showDaySummary: state.showDaySummary,
+        showSwitchTaskDialog: state.showSwitchTaskDialog,
+        showAutoEndDialog: state.showAutoEndDialog,
+        isExtraTime: state.isExtraTime,
+        hourlyProgress: state.hourlyProgress.map((progress) => ({
+          ...progress,
+          timestamp: progress.timestamp.toISOString(),
+        })),
+        showProgressPrompt: state.showProgressPrompt,
+        pendingHourMilestone: state.pendingHourMilestone,
+        manualProgressPercentage: state.manualProgressPercentage,
+        pauseCount: state.pauseCount,
+        meetingCount: state.meetingCount,
+        progressNotes: state.progressNotes.map((note) => ({
+          ...note,
+          timestamp: note.timestamp.toISOString(),
+        })),
+        sessionEntries: state.sessionEntries,
+        activeSessionId: state.activeSessionId,
+      },
+    }
+
+    window.localStorage.setItem(storageKey, JSON.stringify(snapshot))
+  }, [hasHydratedSnapshot, scheduleEndTime, state, user?.id])
 
   const startDay = useCallback(
     (projectId: string, taskId: string, userId?: string, existingSessionId?: string): string => {

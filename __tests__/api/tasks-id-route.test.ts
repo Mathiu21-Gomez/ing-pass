@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 
 let rootSelectRows: unknown[] = []
 let transactionSelectRows: unknown[] = []
-let transactionCalls = 0
+let batchCalls = 0
 let deleteWhereCalls = 0
 let insertedValues: unknown[] = []
 
@@ -48,22 +48,15 @@ vi.mock("@/db", () => {
       }),
     }))
 
-  const createTransactionClient = () => ({
-    select: createSelectMock("transaction"),
-    update: createUpdateMock(),
-    delete: createDeleteMock(),
-    insert: createInsertMock(),
-  })
-
   return {
     db: {
       select: createSelectMock("root"),
       update: createUpdateMock(),
       delete: createDeleteMock(),
       insert: createInsertMock(),
-      transaction: vi.fn(async (callback: (tx: ReturnType<typeof createTransactionClient>) => Promise<unknown>) => {
-        transactionCalls += 1
-        return callback(createTransactionClient())
+      batch: vi.fn(async (queries: Promise<unknown>[]) => {
+        batchCalls += 1
+        return Promise.all(queries)
       }),
     },
   }
@@ -89,7 +82,7 @@ describe("PATCH /api/tasks/[id]", () => {
     vi.clearAllMocks()
     rootSelectRows = [{ id: "task-1", name: "Existing task" }]
     transactionSelectRows = [{ id: "task-1", name: "Existing task" }]
-    transactionCalls = 0
+    batchCalls = 0
     deleteWhereCalls = 0
     insertedValues = []
 
@@ -108,7 +101,7 @@ describe("PATCH /api/tasks/[id]", () => {
     } as never)
   })
 
-  it("updates the task and replaces assignments in a single transaction", async () => {
+  it("updates the task and replaces assignments in a single Neon batch", async () => {
     const req = new NextRequest("http://localhost/api/tasks/task-1", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -122,7 +115,7 @@ describe("PATCH /api/tasks/[id]", () => {
     const body = await res.json()
 
     expect(res.status).toBe(200)
-    expect(transactionCalls).toBe(1)
+    expect(batchCalls).toBe(1)
     expect(deleteWhereCalls).toBe(1)
     expect(insertedValues).toEqual([[{ taskId: "task-1", userId: "worker-1" }, { taskId: "task-1", userId: "worker-2" }]])
     expect(body.assignedTo).toEqual(["worker-1", "worker-2"])
@@ -140,7 +133,7 @@ describe("PATCH /api/tasks/[id]", () => {
 
     expect(res.status).toBe(400)
     expect(body.error).toMatch(/assignedTo debe ser un array de strings/i)
-    expect(transactionCalls).toBe(0)
+    expect(batchCalls).toBe(0)
     expect(deleteWhereCalls).toBe(0)
     expect(insertedValues).toHaveLength(0)
   })

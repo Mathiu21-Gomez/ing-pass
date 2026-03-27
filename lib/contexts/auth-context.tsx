@@ -32,6 +32,7 @@ interface AuthContextType {
   hasPermission: (module: Module, action: Action) => boolean
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>
   logout: () => Promise<void>
+  refreshSession: () => Promise<void>
   isAuthenticated: boolean
   isLoading: boolean
 }
@@ -119,6 +120,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [loadPermissions]
   )
 
+  const refreshSession = useCallback(async () => {
+    try {
+      const { data } = await authClient.getSession()
+      if (data?.user) {
+        const authUser = data.user as unknown as AuthUser
+        setUser(authUser)
+        await loadPermissions(authUser)
+      } else {
+        setUser(null)
+        setPermissions(new Set())
+      }
+    } catch {
+      // Session refresh failed silently
+    }
+  }, [loadPermissions])
+
   const logout = useCallback(async () => {
     await authClient.signOut()
     setUser(null)
@@ -140,6 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         hasPermission,
         login,
         logout,
+        refreshSession,
         isAuthenticated: !!user,
         isLoading,
       }}

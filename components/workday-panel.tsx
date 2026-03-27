@@ -85,6 +85,7 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
     endLunch,
     startMeeting,
     endMeeting,
+    switchTask,
     formatTime,
     isExtraTime,
     setScheduleEndTime,
@@ -116,12 +117,8 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
 
   // Restore project/task selection from timer context on remount
   useEffect(() => {
-    if (currentProjectId && !selectedProjectId) {
-      setSelectedProjectId(currentProjectId)
-    }
-    if (currentTaskId && !selectedTaskId) {
-      setSelectedTaskId(currentTaskId)
-    }
+    if (currentProjectId) setSelectedProjectId(currentProjectId)
+    if (currentTaskId) setSelectedTaskId(currentTaskId)
   }, [currentProjectId, currentTaskId])
 
   // Pre-start fields
@@ -224,7 +221,7 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
       const created = await projectsApi.createTask(selectedProjectId, {
         name: newTaskName.trim(),
         description: newTaskDescription.trim(),
-        assignedTo: [user.id],
+        assignedTo: user.role === "trabajador" ? [user.id] : [],
         createdBy: user.id,
       })
 
@@ -284,21 +281,25 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
   }
 
   // ─── Change task without stopping timer ─────
-  function handleTaskChange() {
+  async function handleTaskChange() {
     if (!newTaskId || newTaskId === selectedTaskId) {
       setShowTaskChangeDialog(false)
       return
     }
-    const task = selectedProject?.tasks.find((t) => t.id === newTaskId)
+
+    const nextTaskId = newTaskId
+    const task = selectedProject?.tasks.find((t) => t.id === nextTaskId)
+
+    setSelectedTaskId(nextTaskId)
+    await switchTask(selectedProjectId, nextTaskId)
     setTaskChanges((prev) => [...prev, {
       id: `tc_${Date.now()}`,
       projectId: selectedProjectId,
-      taskId: newTaskId,
+      taskId: nextTaskId,
       taskName: task?.name ?? "",
       projectName: selectedProject?.name ?? "",
       switchedAt: new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
     }])
-    setSelectedTaskId(newTaskId)
     setShowTaskChangeDialog(false)
     setNewTaskId("")
     toast.success("Tarea cambiada — timer sigue corriendo")
@@ -343,6 +344,7 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
   }
 
   const isWorking = status === "trabajando" || status === "colacion" || status === "pausado" || status === "reunion"
+  const canSwitchTask = status === "trabajando" || status === "pausado"
   const canStart = status === "inactivo" || status === "finalizado"
 
   // Set schedule end time for auto-finalize
@@ -496,7 +498,7 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
               </div>
 
               {/* Task change button (only while working) */}
-              {isWorking && availableTasks.length > 1 && (
+              {canSwitchTask && availableTasks.length > 1 && (
                 <Button
                   variant="outline"
                   size="sm"

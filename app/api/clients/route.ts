@@ -61,6 +61,17 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(newClient, { status: 201 })
   } catch (error) {
+    const isUniqueViolation =
+      typeof error === "object" && error !== null &&
+      "code" in error && (error as { code: string }).code === "23505"
+
+    if (isUniqueViolation) {
+      return NextResponse.json(
+        { error: "Ya existe un cliente con ese RUT" },
+        { status: 409 }
+      )
+    }
+
     console.error("Error creating client:", error)
     return NextResponse.json(
       { error: "Error al crear cliente" },

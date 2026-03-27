@@ -117,46 +117,98 @@ export async function PATCH(
       )
     }
 
-    const updatedTask = await db.transaction(async (tx) => {
-      let currentTask
+    let currentTask
 
+    if (assignedTo !== undefined) {
       if (Object.keys(updateData).length > 0) {
-        const updated = await tx
-          .update(tasks)
-          .set(updateData)
-          .where(eq(tasks.id, id))
-          .returning()
+        if (assignedTo.length > 0) {
+          const [updated] = await db.batch([
+            db
+              .update(tasks)
+              .set(updateData)
+              .where(eq(tasks.id, id))
+              .returning(),
+            db.delete(taskAssignments).where(eq(taskAssignments.taskId, id)),
+            db.insert(taskAssignments).values(
+              assignedTo.map((userId) => ({ taskId: id, userId }))
+            ),
+          ])
 
-        if (updated.length === 0) {
-          return null
+          if (updated.length === 0) {
+            currentTask = null
+          } else {
+            currentTask = updated[0]
+          }
+        } else {
+          const [updated] = await db.batch([
+            db
+              .update(tasks)
+              .set(updateData)
+              .where(eq(tasks.id, id))
+              .returning(),
+            db.delete(taskAssignments).where(eq(taskAssignments.taskId, id)),
+          ])
+
+          if (updated.length === 0) {
+            currentTask = null
+          } else {
+            currentTask = updated[0]
+          }
         }
-
-        currentTask = updated[0]
-      } else {
-        const existing = await tx.select().from(tasks).where(eq(tasks.id, id))
+      } else if (assignedTo.length > 0) {
+        const [existing] = await db.batch([
+          db.select().from(tasks).where(eq(tasks.id, id)),
+          db.delete(taskAssignments).where(eq(taskAssignments.taskId, id)),
+          db.insert(taskAssignments).values(
+            assignedTo.map((userId) => ({ taskId: id, userId }))
+          ),
+        ])
 
         if (existing.length === 0) {
-          return null
+          currentTask = null
+        } else {
+          currentTask = existing[0]
         }
+      } else {
+        const [existing] = await db.batch([
+          db.select().from(tasks).where(eq(tasks.id, id)),
+          db.delete(taskAssignments).where(eq(taskAssignments.taskId, id)),
+        ])
 
+        if (existing.length === 0) {
+          currentTask = null
+        } else {
+          currentTask = existing[0]
+        }
+      }
+    } else if (Object.keys(updateData).length > 0) {
+      const updated = await db
+        .update(tasks)
+        .set(updateData)
+        .where(eq(tasks.id, id))
+        .returning()
+
+      if (updated.length === 0) {
+        currentTask = null
+      } else {
+        currentTask = updated[0]
+      }
+    } else {
+      const existing = await db.select().from(tasks).where(eq(tasks.id, id))
+
+      if (existing.length === 0) {
+        currentTask = null
+      } else {
         currentTask = existing[0]
       }
+    }
 
-      if (assignedTo !== undefined) {
-        await tx.delete(taskAssignments).where(eq(taskAssignments.taskId, id))
-
-        if (assignedTo.length > 0) {
-          await tx.insert(taskAssignments).values(
-            assignedTo.map((userId) => ({ taskId: id, userId }))
-          )
+    const updatedTask = currentTask
+      ? {
+          ...currentTask,
+          assignedTo,
         }
-      }
-
-      return {
-        ...currentTask,
-        assignedTo,
-      }
-    })
+      : null
 
     if (!updatedTask) {
       return NextResponse.json(

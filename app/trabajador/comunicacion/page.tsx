@@ -1,9 +1,11 @@
 "use client"
 
+import Link from "next/link"
 import { useTimer } from "@/lib/contexts/timer-context"
 import { ChatPanel } from "@/components/chat-panel"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { MessageSquare, Clock } from "lucide-react"
+import { MessageSquare, Clock, ArrowRight, Newspaper } from "lucide-react"
 
 export default function TrabajadorComunicacionPage() {
   const { status, activeSessionId } = useTimer()
@@ -28,6 +30,20 @@ export default function TrabajadorComunicacionPage() {
               El chat se habilita cuando iniciás tu jornada laboral en la página <strong>Mi Jornada</strong>.
               Los mensajes quedan vinculados a cada jornada.
             </p>
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              <Link href="/trabajador/mi-jornada">
+                <Button className="gap-2">
+                  Ir a Mi Jornada
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+              <Link href="/trabajador/noticias">
+                <Button variant="outline" className="gap-2">
+                  Ver Novedades
+                  <Newspaper className="h-4 w-4" />
+                </Button>
+              </Link>
+            </div>
           </CardContent>
         </Card>
       </div>

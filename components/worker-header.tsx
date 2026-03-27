@@ -5,13 +5,12 @@ import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { useTimer } from "@/lib/contexts/timer-context"
 import { cn } from "@/lib/utils"
-import { History, Timer, LogOut, Home, ClipboardList } from "lucide-react"
+import { History, Timer, LogOut, Home } from "lucide-react"
 import Image from "next/image"
 
 const navItems = [
   { href: "/trabajador/home", label: "Inicio", icon: Home },
   { href: "/trabajador/mi-jornada", label: "Mi Jornada", icon: Timer },
-  { href: "/trabajador/tareas", label: "Tareas", icon: ClipboardList },
   { href: "/trabajador/historial", label: "Historial", icon: History },
 ]
 

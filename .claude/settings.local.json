@@ -9,7 +9,8 @@
       "Bash(pnpm dlx:*)",
       "Bash(pnpm:*)",
       "Bash(npx skills:*)",
-      "Bash(npx:*)"
+      "Bash(npx:*)",
+      "mcp__plugin_engram_engram__mem_search"
     ]
   }
 }

@@ -67,8 +67,8 @@ export default function ClientesPage() {
         toast.success("Cliente creado")
       }
       crud.closeDialog()
-    } catch {
-      toast.error("Error al guardar cliente")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al guardar cliente")
     }
   }
 
@@ -78,8 +78,8 @@ export default function ClientesPage() {
         await clientsApi.delete(crud.deleteConfirmId)
         crud.remove(crud.deleteConfirmId)
         toast.success("Cliente eliminado")
-      } catch {
-        toast.error("Error al eliminar cliente")
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Error al eliminar cliente")
       }
     }
   }

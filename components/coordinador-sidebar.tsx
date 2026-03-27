@@ -15,6 +15,7 @@ import {
     Menu,
     Home,
     Inbox,
+    Megaphone,
     Timer,
     Clock,
 } from "lucide-react"
@@ -31,11 +32,12 @@ import {
 const navItems = [
     { href: "/coordinador/home", label: "Inicio", icon: Home },
     { href: "/coordinador/mi-jornada", label: "Mi Jornada", icon: Timer },
+    { href: "/coordinador/noticias", label: "Novedades", icon: Megaphone },
     { href: "/coordinador/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/coordinador/mi-historial", label: "Mi Historial", icon: Clock },
     { href: "/coordinador/tareas", label: "Gestión de Tareas", icon: ClipboardList },
     { href: "/coordinador/equipo", label: "Panel Equipo", icon: Users },
-    { href: "/coordinador/bandeja", label: "Bandeja", icon: Inbox },
+    { href: "/coordinador/bandeja", label: "Comunicación", icon: Inbox },
 ]
 
 function SidebarContent({ onItemClick }: { onItemClick?: () => void }) {

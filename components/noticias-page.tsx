@@ -491,106 +491,113 @@ export function NoticiasPage() {
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <div className="grid grid-cols-5 gap-3 min-w-[680px] h-full">
-            {weekDays.map((day, i) => {
-              const dayNotes = notesByDay(day)
-              const today = isToday(day)
+          <div className="space-y-4">
+            {totalWeekNotes === 0 && (
+              <div className="rounded-2xl border border-dashed border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+                No hay publicaciones para esta semana todavia. Cuando el equipo cargue novedades, las vas a ver aca.
+              </div>
+            )}
+            <div className="grid grid-cols-5 gap-3 min-w-[680px] h-full">
+              {weekDays.map((day, i) => {
+                const dayNotes = notesByDay(day)
+                const today = isToday(day)
 
-              return (
-                <div
-                  key={i}
-                  className={cn(
-                    "flex flex-col rounded-2xl border overflow-hidden",
-                    today
-                      ? "border-primary/40 dark:border-primary/25"
-                      : "border-slate-200/80 dark:border-0",
-                    "bg-slate-100/70 dark:bg-surface-kanban-column"
-                  )}
-                >
-                  {/* Day header */}
+                return (
                   <div
+                    key={i}
                     className={cn(
-                      "flex items-start justify-between px-4 pt-4 pb-3 flex-shrink-0",
+                      "flex flex-col rounded-2xl border overflow-hidden",
                       today
-                        ? "bg-primary/8 dark:bg-primary/10"
-                        : "bg-slate-50/80 dark:bg-accent"
+                        ? "border-primary/40 dark:border-primary/25"
+                        : "border-slate-200/80 dark:border-0",
+                      "bg-slate-100/70 dark:bg-surface-kanban-column"
                     )}
                   >
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <span
+                    {/* Day header */}
+                    <div
+                      className={cn(
+                        "flex items-start justify-between px-4 pt-4 pb-3 flex-shrink-0",
+                        today
+                          ? "bg-primary/8 dark:bg-primary/10"
+                          : "bg-slate-50/80 dark:bg-accent"
+                      )}
+                    >
+                      <div>
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span
+                            className={cn(
+                              "text-[11px] font-bold uppercase tracking-widest",
+                              today
+                                ? "text-primary"
+                                : "text-muted-foreground"
+                            )}
+                          >
+                            {DAY_LABELS[i]}
+                          </span>
+                          {today && (
+                            <span className="rounded-full bg-primary text-white text-[9px] px-1.5 py-0.5 font-bold leading-none">
+                              HOY
+                            </span>
+                          )}
+                        </div>
+                        <p
                           className={cn(
-                            "text-[11px] font-bold uppercase tracking-widest",
+                            "text-2xl font-bold leading-none",
                             today
                               ? "text-primary"
-                              : "text-muted-foreground"
+                              : "text-foreground"
                           )}
                         >
-                          {DAY_LABELS[i]}
-                        </span>
-                        {today && (
-                          <span className="rounded-full bg-primary text-white text-[9px] px-1.5 py-0.5 font-bold leading-none">
-                            HOY
-                          </span>
-                        )}
-                      </div>
-                      <p
-                        className={cn(
-                          "text-2xl font-bold leading-none",
-                          today
-                            ? "text-primary"
-                            : "text-foreground"
-                        )}
-                      >
-                        {format(day, "d")}
-                      </p>
-                      <p className="text-[10px] text-slate-400 dark:text-slate-600 capitalize mt-0.5">
-                        {format(day, "MMMM", { locale: es })}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-1 mt-0.5">
-                      {dayNotes.length > 0 && (
-                        <span className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-slate-200 dark:bg-accent text-[10px] font-bold text-slate-600 dark:text-muted-foreground px-1">
-                          {dayNotes.length}
-                        </span>
-                      )}
-                      <button
-                        onClick={openCreate}
-                        className={cn(
-                          "rounded-lg p-1 transition-colors",
-                          today
-                            ? "text-primary hover:bg-primary/15"
-                            : "text-slate-400 hover:text-primary hover:bg-primary/10 dark:hover:bg-accent"
-                        )}
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Notes list */}
-                  <div className="flex flex-col gap-2 p-2.5 flex-1 overflow-y-auto">
-                    {dayNotes.length === 0 ? (
-                      <div className="flex items-center justify-center py-8">
-                        <p className="text-[11px] text-slate-400 dark:text-slate-700">
-                          Sin publicaciones
+                          {format(day, "d")}
+                        </p>
+                        <p className="text-[10px] text-slate-400 dark:text-slate-600 capitalize mt-0.5">
+                          {format(day, "MMMM", { locale: es })}
                         </p>
                       </div>
-                    ) : (
-                      dayNotes.map((note) => (
-                        <CalendarNoteCard
-                          key={note.id}
-                          note={note}
-                          onEdit={openEdit}
-                          onDelete={setDeleteTarget}
-                        />
-                      ))
-                    )}
+
+                      <div className="flex items-center gap-1 mt-0.5">
+                        {dayNotes.length > 0 && (
+                          <span className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-slate-200 dark:bg-accent text-[10px] font-bold text-slate-600 dark:text-muted-foreground px-1">
+                            {dayNotes.length}
+                          </span>
+                        )}
+                        <button
+                          onClick={openCreate}
+                          className={cn(
+                            "rounded-lg p-1 transition-colors",
+                            today
+                              ? "text-primary hover:bg-primary/15"
+                              : "text-slate-400 hover:text-primary hover:bg-primary/10 dark:hover:bg-accent"
+                          )}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Notes list */}
+                    <div className="flex flex-col gap-2 p-2.5 flex-1 overflow-y-auto">
+                      {dayNotes.length === 0 ? (
+                        <div className="flex items-center justify-center py-8">
+                          <p className="text-[11px] text-slate-400 dark:text-slate-700">
+                            Sin publicaciones
+                          </p>
+                        </div>
+                      ) : (
+                        dayNotes.map((note) => (
+                          <CalendarNoteCard
+                            key={note.id}
+                            note={note}
+                            onEdit={openEdit}
+                            onDelete={setDeleteTarget}
+                          />
+                        ))
+                      )}
+                    </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
         )}
       </div>

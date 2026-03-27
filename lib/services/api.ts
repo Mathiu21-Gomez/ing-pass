@@ -7,13 +7,24 @@ async function fetcher<T>(url: string): Promise<T> {
     return res.json()
 }
 
+async function extractError(res: Response): Promise<never> {
+    let message = `Error ${res.status}`
+    try {
+        const body = await res.json()
+        if (body?.error) message = body.error
+    } catch {
+        // body no es JSON, usamos mensaje genérico
+    }
+    throw new Error(message)
+}
+
 async function poster<T>(url: string, body: unknown): Promise<T> {
     const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
     })
-    if (!res.ok) throw new Error(`Error ${res.status}: ${res.statusText}`)
+    if (!res.ok) await extractError(res)
     return res.json()
 }
 
@@ -23,13 +34,13 @@ async function patcher<T>(url: string, body: unknown): Promise<T> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
     })
-    if (!res.ok) throw new Error(`Error ${res.status}: ${res.statusText}`)
+    if (!res.ok) await extractError(res)
     return res.json()
 }
 
 async function deleter(url: string): Promise<void> {
     const res = await fetch(url, { method: "DELETE" })
-    if (!res.ok) throw new Error(`Error ${res.status}: ${res.statusText}`)
+    if (!res.ok) await extractError(res)
 }
 
 // ══════════════════════════════════════════════

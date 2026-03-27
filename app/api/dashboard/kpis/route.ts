@@ -53,7 +53,8 @@ export async function GET(request: NextRequest) {
     }
 
     // ── Base data ──
-    let allProjects = await db.select().from(projects)
+    const allProjectsUnfiltered = await db.select().from(projects)
+    let allProjects = allProjectsUnfiltered
     if (filterProjectId) allProjects = allProjects.filter((p) => p.id === filterProjectId)
     if (filterCoordinatorId) allProjects = allProjects.filter((p) => p.coordinatorId === filterCoordinatorId)
 
@@ -61,6 +62,7 @@ export async function GET(request: NextRequest) {
 
     let allTasks = await db.select().from(tasks)
     allTasks = allTasks.filter((t) => projectIds.includes(t.projectId))
+    if (startDate) allTasks = allTasks.filter((t) => t.createdAt.toISOString().split("T")[0] >= startDate!)
 
     const allActivities = await db.select().from(activities)
 
@@ -81,7 +83,7 @@ export async function GET(request: NextRequest) {
     const taskStatusBreakdown = TASK_STATUSES.map((status) => ({
       status,
       count: allTasks.filter((t) => t.status === status).length,
-    }))
+    })).filter((s) => s.count > 0)
 
     // ── Task completion by project ──
     const tasksByProject = allProjects
@@ -195,8 +197,8 @@ export async function GET(request: NextRequest) {
       hoursByWorker,
       activeWorkersToday,
       weeklyTrend,
-      totalProjects: allProjects.length,
-      activeProjects: allProjects.filter((p) => p.status === "Activo").length,
+      totalProjects: allProjectsUnfiltered.length,
+      activeProjects: allProjectsUnfiltered.filter((p) => p.status === "Activo").length,
       totalWorkers: workers.length,
     })
   } catch (error) {

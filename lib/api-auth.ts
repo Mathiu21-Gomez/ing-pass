@@ -47,7 +47,10 @@ export async function getAuthUser(request: NextRequest): Promise<AuthResult> {
 
 export function requireRole(user: ApiUser, roles: string[]): NextResponse | null {
   if (!roles.includes(user.role)) {
-    return NextResponse.json({ error: "Sin permisos suficientes" }, { status: 403 })
+    return NextResponse.json(
+      { error: `Sin permisos suficientes (rol: '${user.role}', requerido: ${roles.join("/")})` },
+      { status: 403 }
+    )
   }
   return null
 }

@@ -4,6 +4,7 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url("DATABASE_URL debe ser una URL valida"),
   BETTER_AUTH_SECRET: z.string().min(32, "BETTER_AUTH_SECRET debe tener al menos 32 caracteres"),
   BETTER_AUTH_URL: z.string().url("BETTER_AUTH_URL debe ser una URL valida"),
+  BETTER_AUTH_ALLOWED_HOSTS: z.string().optional(),
 })
 
 export type AppEnv = z.infer<typeof envSchema>
@@ -19,6 +20,7 @@ export function getEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     DATABASE_URL: source.DATABASE_URL,
     BETTER_AUTH_SECRET: source.BETTER_AUTH_SECRET,
     BETTER_AUTH_URL: source.BETTER_AUTH_URL,
+    BETTER_AUTH_ALLOWED_HOSTS: source.BETTER_AUTH_ALLOWED_HOSTS,
   })
 
   if (!parsed.success) {

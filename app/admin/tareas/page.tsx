@@ -819,7 +819,10 @@ export default function AdminTareasPage() {
         body: JSON.stringify({ ...createForm, createdBy: user.id }),
       })
       if (!res.ok) {
-        toast.error("Error al crear tarea")
+        const body = await res.json().catch(() => ({}))
+        const details = body?.details?.fieldErrors
+        const firstDetail = details ? Object.values(details).flat()[0] : null
+        toast.error(firstDetail ?? body?.error ?? "Error al crear tarea")
         return
       }
       const newTask = await res.json()
@@ -1086,7 +1089,7 @@ export default function AdminTareasPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button>
-            <Button onClick={handleCreateTask} disabled={!createForm.name.trim() || !createForm.projectId || createLoading}>
+            <Button onClick={handleCreateTask} disabled={createForm.name.trim().length < 3 || !createForm.projectId || createLoading}>
               {createLoading ? "Creando..." : "Crear tarea"}
             </Button>
           </DialogFooter>

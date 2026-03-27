@@ -70,13 +70,16 @@ export async function PUT(
       }
     }
 
-    await db.transaction(async (tx) => {
-      await tx.delete(taskTags).where(eq(taskTags.taskId, taskId))
-
-      if (tagIds.length > 0) {
-        await tx.insert(taskTags).values(tagIds.map((tagId) => ({ taskId, tagId })))
-      }
-    })
+    if (tagIds.length > 0) {
+      await db.batch([
+        db.delete(taskTags).where(eq(taskTags.taskId, taskId)),
+        db.insert(taskTags).values(tagIds.map((tagId) => ({ taskId, tagId }))),
+      ])
+    } else {
+      await db.batch([
+        db.delete(taskTags).where(eq(taskTags.taskId, taskId)),
+      ])
+    }
 
     return NextResponse.json({ success: true })
   } catch (err) {

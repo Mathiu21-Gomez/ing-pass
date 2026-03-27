@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 
 import { db } from "@/db"
-import { projects, tasks } from "@/db/schema"
+import { projects, tasks, taskAssignments } from "@/db/schema"
 import type { ApiUser } from "@/lib/api-auth"
 
 export interface TaskAccessContext {
@@ -56,6 +56,27 @@ export async function getTaskAccessContext(
     return {
       context: null,
       error: NextResponse.json({ error: "Tarea no encontrada" }, { status: 404 }),
+    }
+  }
+
+  if (user.role === "trabajador") {
+    const assignment = await db
+      .select({ taskId: taskAssignments.taskId })
+      .from(taskAssignments)
+      .where(
+        and(
+          eq(taskAssignments.taskId, taskContext.taskId),
+          eq(taskAssignments.userId, user.id)
+        )
+      )
+
+    if (assignment.length > 0) {
+      return { context: taskContext, error: null }
+    }
+
+    return {
+      context: null,
+      error: NextResponse.json({ error: "Sin permisos suficientes" }, { status: 403 }),
     }
   }
 

@@ -121,10 +121,13 @@ export default function AdminDashboard() {
 
   const totalHoursToday = activeToday.reduce((acc: number, e: TimeEntryEnriched) => acc + (e.effectiveHours ?? 0), 0)
   const finishedEntries = activeToday.filter((e: TimeEntryEnriched) => e.status === "finalizado")
-  const avgCompliance = Math.round(
-    (activeToday.filter((e: TimeEntryEnriched) => e.effectiveHours >= 7.5).length /
-      Math.max(finishedEntries.length, 1)) * 100
-  )
+  const hasComplianceData = finishedEntries.length > 0
+  const avgCompliance = hasComplianceData
+    ? Math.round(
+        (finishedEntries.filter((e: TimeEntryEnriched) => e.effectiveHours >= 7.5).length /
+          finishedEntries.length) * 100
+      )
+    : null
 
   const kpis = [
     {
@@ -140,7 +143,7 @@ export default function AdminDashboard() {
       numericValue: Math.round(totalHoursToday * 10) / 10,
       suffix: "h",
       icon: Clock,
-      detail: `${activeToday.length} jornadas registradas`,
+      detail: activeToday.length === 0 ? "Sin jornadas registradas hoy" : `${activeToday.length} jornada${activeToday.length !== 1 ? "s" : ""} registrada${activeToday.length !== 1 ? "s" : ""}`,
     },
     {
       label: "Proyectos Activos",
@@ -151,11 +154,12 @@ export default function AdminDashboard() {
     },
     {
       label: "Cumplimiento",
-      value: `${avgCompliance}%`,
-      numericValue: avgCompliance,
-      suffix: "%",
+      value: avgCompliance === null ? "Sin datos" : `${avgCompliance}%`,
+      numericValue: avgCompliance ?? 0,
+      suffix: avgCompliance === null ? "" : "%",
+      displayText: avgCompliance === null ? "Sin datos" : undefined,
       icon: TrendingUp,
-      detail: "Jornadas de 8h completadas",
+      detail: avgCompliance === null ? "Sin jornadas finalizadas hoy" : "Jornadas de 8h completadas",
     },
   ]
 
@@ -256,11 +260,17 @@ export default function AdminDashboard() {
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     {kpi.label}
                   </p>
-                  <AnimatedCounter
-                    value={kpi.numericValue}
-                    suffix={kpi.suffix ?? ""}
-                    className="mt-2 text-3xl font-bold tracking-tight text-foreground number-pop"
-                  />
+                  {kpi.displayText ? (
+                    <span className="mt-2 text-3xl font-bold tracking-tight text-muted-foreground number-pop block">
+                      {kpi.displayText}
+                    </span>
+                  ) : (
+                    <AnimatedCounter
+                      value={kpi.numericValue}
+                      suffix={kpi.suffix ?? ""}
+                      className="mt-2 text-3xl font-bold tracking-tight text-foreground number-pop"
+                    />
+                  )}
                   <p className="mt-1 text-xs text-muted-foreground">{kpi.detail}</p>
                 </div>
                 <div className="rounded-xl bg-primary/8 p-3">
@@ -273,57 +283,61 @@ export default function AdminDashboard() {
       </div>
 
       {/* Task status breakdown */}
-      {statusChartData.length > 0 && (
-        <Card className="card-hover">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <ListChecks className="h-4 w-4" />
-              Distribución de Tareas por Estado
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer
-              config={Object.fromEntries(
-                statusChartData.map((s: { status: string; count: number; fill: string }) => [s.status, { label: s.status, color: s.fill }])
-              )}
-              className="h-[200px]"
-            >
-              <BarChart data={statusChartData} margin={{ top: 10, bottom: 0 }}>
-                <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
-                <XAxis
-                  dataKey="status"
-                  tickLine={false}
-                  axisLine={false}
-                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-                />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-                  allowDecimals={false}
-                  width={30}
-                />
-                <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
-                <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                  {statusChartData.map((entry: { status: string; count: number; fill: string }, i: number) => (
-                    <Cell key={i} fill={entry.fill} />
-                  ))}
-                  <LabelList dataKey="count" position="top" fontSize={11} fill="hsl(var(--foreground))" />
-                </Bar>
-              </BarChart>
-            </ChartContainer>
-            {/* Legend */}
-            <div className="mt-3 flex flex-wrap gap-3 justify-center">
-              {statusChartData.map((s: { status: string; count: number; fill: string }) => (
-                <div key={s.status} className="flex items-center gap-1.5">
-                  <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.fill }} />
-                  <span className="text-xs text-muted-foreground">{s.status}</span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <Card className="card-hover">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+            <ListChecks className="h-4 w-4" />
+            Distribución de Tareas por Estado
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {statusChartData.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">Sin datos para el período seleccionado</p>
+          ) : (
+            <>
+              <ChartContainer
+                config={Object.fromEntries(
+                  statusChartData.map((s: { status: string; count: number; fill: string }) => [s.status, { label: s.status, color: s.fill }])
+                )}
+                className="h-[200px]"
+              >
+                <BarChart data={statusChartData} margin={{ top: 10, bottom: 0 }}>
+                  <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
+                  <XAxis
+                    dataKey="status"
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                    allowDecimals={false}
+                    width={30}
+                  />
+                  <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
+                  <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                    {statusChartData.map((entry: { status: string; count: number; fill: string }, i: number) => (
+                      <Cell key={i} fill={entry.fill} />
+                    ))}
+                    <LabelList dataKey="count" position="top" fontSize={11} fill="hsl(var(--foreground))" />
+                  </Bar>
+                </BarChart>
+              </ChartContainer>
+              {/* Legend */}
+              <div className="mt-3 flex flex-wrap gap-3 justify-center">
+                {statusChartData.map((s: { status: string; count: number; fill: string }) => (
+                  <div key={s.status} className="flex items-center gap-1.5">
+                    <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.fill }} />
+                    <span className="text-xs text-muted-foreground">{s.status}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Charts row */}
       <div className="grid gap-6 lg:grid-cols-2">

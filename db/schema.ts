@@ -97,6 +97,10 @@ export const user = pgTable("user", {
   scheduleType: text("schedule_type").default("fijo"),
   workerStatus: text("worker_status"),
   active: boolean("active").default(true),
+  // Required by Better Auth admin plugin
+  banned: boolean("banned").default(false),
+  banReason: text("ban_reason"),
+  banExpires: timestamp("ban_expires"),
 })
 
 export const session = pgTable(
@@ -302,10 +306,10 @@ export const timeEntries = pgTable("time_entries", {
     .references(() => user.id),
   projectId: uuid("project_id")
     .notNull()
-    .references(() => projects.id),
+    .references(() => projects.id, { onDelete: "cascade" }),
   taskId: uuid("task_id")
     .notNull()
-    .references(() => tasks.id),
+    .references(() => tasks.id, { onDelete: "cascade" }),
   date: date("date").notNull(),
   startTime: varchar("start_time", { length: 5 }).notNull(),
   lunchStartTime: varchar("lunch_start_time", { length: 5 }),
