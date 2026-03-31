@@ -32,12 +32,13 @@ import {
   CalendarDays,
   CheckCircle2,
   Circle,
+  AlertCircle,
   Loader2,
+  Pencil,
   Trash2,
   Users,
   ClipboardList,
   Play,
-  Timer,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -115,6 +116,7 @@ export default function CoordinadorHomePage() {
   const [loadingTasks, setLoadingTasks] = useState(false)
 
   const [showCreateEvent, setShowCreateEvent] = useState(false)
+  const [editingEvent, setEditingEvent] = useState<AppEvent | null>(null)
   const [eventForm, setEventForm] = useState({
     title: "",
     content: "",
@@ -217,6 +219,42 @@ export default function CoordinadorHomePage() {
     }
   }
 
+  function handleOpenEdit(ev: AppEvent) {
+    setEditingEvent(ev)
+    setEventForm({
+      title: ev.title,
+      content: ev.content ?? "",
+      type: ev.type,
+      eventDate: ev.eventDate ?? "",
+      targetRoles: ev.targetRoles ?? [],
+      pinned: ev.pinned,
+    })
+    setShowCreateEvent(true)
+  }
+
+  async function handleUpdateEvent() {
+    if (!eventForm.title.trim() || !editingEvent) return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/events/${editingEvent.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(eventForm),
+      })
+      if (!res.ok) throw new Error()
+      const updated = await res.json()
+      setEvents((prev) => prev.map((e) => (e.id === editingEvent.id ? updated : e)))
+      setShowCreateEvent(false)
+      setEditingEvent(null)
+      setEventForm({ title: "", content: "", type: "comunicado", eventDate: "", targetRoles: [], pinned: false })
+      toast.success("Comunicado actualizado")
+    } catch {
+      toast.error("Error al actualizar comunicado")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function handleTogglePin(ev: AppEvent) {
     try {
       const res = await fetch(`/api/events/${ev.id}`, {
@@ -244,15 +282,31 @@ export default function CoordinadorHomePage() {
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-6 animate-fade-in">
+        <div className="flex items-start justify-between">
+          <div className="space-y-2">
+            <div className="h-8 w-52 rounded-lg skeleton-shimmer" />
+            <div className="h-4 w-64 rounded skeleton-shimmer" />
+          </div>
+          <div className="h-9 w-40 rounded-md skeleton-shimmer" />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="space-y-4">
+            <div className="h-44 rounded-xl skeleton-shimmer" />
+            <div className="h-36 rounded-xl skeleton-shimmer" />
+          </div>
+          <div className="lg:col-span-2 space-y-4">
+            <div className="h-36 rounded-xl skeleton-shimmer" />
+            <div className="h-56 rounded-xl skeleton-shimmer" />
+          </div>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between">
+    <div className="space-y-6 page-enter">
+      <div className="flex items-start justify-between animate-fade-in-up">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
             {greeting}, {user?.name?.split(" ")[0]}
@@ -266,14 +320,14 @@ export default function CoordinadorHomePage() {
             })}
           </p>
         </div>
-        <Button onClick={() => setShowCreateEvent(true)} size="sm">
+        <Button onClick={() => setShowCreateEvent(true)} size="sm" className="btn-press">
           <Plus className="h-4 w-4 mr-1.5" />
           Nuevo comunicado
         </Button>
       </div>
 
       {pendingAlerts.length > 0 && (
-        <div className="flex items-center gap-3 rounded-xl border border-orange-500/30 bg-orange-500/10 p-4">
+        <div className="flex items-center gap-3 rounded-xl border border-orange-500/30 bg-orange-500/10 p-4 animate-fade-in-down">
           <Bell className="h-5 w-5 text-orange-600 dark:text-orange-400 shrink-0" />
           <p className="text-sm text-orange-700 dark:text-orange-300 font-medium">
             Tenés {pendingAlerts.length} alerta{pendingAlerts.length > 1 ? "s" : ""} pendiente{pendingAlerts.length > 1 ? "s" : ""}.
@@ -284,9 +338,9 @@ export default function CoordinadorHomePage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 stagger-children">
         <div className="space-y-4">
-          <Card>
+          <Card className="card-hover">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <Clock className="h-4 w-4" />
@@ -301,19 +355,19 @@ export default function CoordinadorHomePage() {
                 {status === "inactivo" || status === "finalizado" ? "No hay jornada activa." : "Tiempo de trabajo efectivo."}
               </p>
               {(status === "inactivo" || status === "finalizado") ? (
-                <Button onClick={handleOpenStartDialog} className="gap-1.5 w-full" size="sm">
+                <Button onClick={handleOpenStartDialog} className="gap-1.5 w-full btn-press" size="sm">
                   <Play className="h-4 w-4" />
                   Iniciar jornada
                 </Button>
               ) : (
                 <div className="flex flex-col items-center gap-3">
-                  <p className={cn("font-mono text-3xl font-bold tabular-nums", timerConfig.color)}>
+                  <p className={cn("font-mono text-3xl font-bold tabular-nums animate-count-up", timerConfig.color)}>
                     {formatTime(elapsedWorkSeconds)}
                   </p>
-                  <Link href="/coordinador/mi-jornada">
-                    <Button size="sm" variant="outline" className="gap-1.5 w-full">
-                      <Timer className="h-4 w-4" />
-                      Ir a Mi Jornada
+                  <Link href="/coordinador/tareas">
+                    <Button size="sm" variant="outline" className="gap-1.5 w-full btn-press">
+                      <AlertCircle className="h-4 w-4" />
+                      Ver mis tareas
                     </Button>
                   </Link>
                 </div>
@@ -321,7 +375,7 @@ export default function CoordinadorHomePage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="card-hover">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <ClipboardList className="h-4 w-4" />
@@ -331,14 +385,14 @@ export default function CoordinadorHomePage() {
             <CardContent className="space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Activas</span>
-                <span className="font-semibold">{activeTasks.length}</span>
+                <span className="font-semibold number-pop">{activeTasks.length}</span>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Finalizadas</span>
-                <span className="font-semibold">{myTasks.filter((t) => t.status === "finalizado").length}</span>
+                <span className="font-semibold number-pop">{myTasks.filter((t) => t.status === "finalizado").length}</span>
               </div>
               <Link href="/coordinador/tareas">
-                <Button variant="outline" size="sm" className="w-full mt-2">
+                <Button variant="outline" size="sm" className="w-full mt-2 btn-press">
                   Ir a Tareas
                 </Button>
               </Link>
@@ -348,7 +402,7 @@ export default function CoordinadorHomePage() {
 
         <div className="lg:col-span-2 space-y-4">
           {activeTasks.length > 0 && (
-            <Card>
+            <Card className="card-hover">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4" />
@@ -356,9 +410,9 @@ export default function CoordinadorHomePage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-2">
+                <div className="space-y-2 stagger-children">
                   {activeTasks.slice(0, 5).map((task) => (
-                    <div key={task.id} className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/30 px-3 py-2.5">
+                    <div key={task.id} className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/30 px-3 py-2.5 table-row-corporate">
                       <span className="text-xs font-mono text-muted-foreground">#{task.correlativeId}</span>
                       <span className="flex-1 text-sm font-medium truncate">{task.name}</span>
                       <span className={cn("text-xs rounded-full px-2 py-0.5 font-medium", STATUS_STYLE[task.status])}>
@@ -371,7 +425,7 @@ export default function CoordinadorHomePage() {
             </Card>
           )}
 
-          <Card>
+          <Card className="card-hover">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <Megaphone className="h-4 w-4" />
@@ -382,9 +436,9 @@ export default function CoordinadorHomePage() {
               {events.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-6">No hay comunicados publicados.</p>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-3 stagger-children">
                   {events.map((ev) => (
-                    <div key={ev.id} className={cn("rounded-xl border p-4 space-y-1.5", ev.pinned ? "border-primary/30 bg-primary/5" : "border-border bg-muted/30")}>
+                    <div key={ev.id} className={cn("rounded-xl border p-4 space-y-1.5 transition-colors", ev.pinned ? "border-primary/30 bg-primary/5" : "border-border bg-muted/30 hover:bg-muted/50")}>
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2 min-w-0">
                           {ev.pinned && <Pin className="h-3.5 w-3.5 text-primary shrink-0" />}
@@ -394,8 +448,11 @@ export default function CoordinadorHomePage() {
                           </Badge>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
-                          <button onClick={() => handleTogglePin(ev)} className="rounded p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
+                          <button onClick={() => handleTogglePin(ev)} className="rounded p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" title={ev.pinned ? "Desfijar" : "Fijar"}>
                             <Pin className="h-3.5 w-3.5" />
+                          </button>
+                          <button onClick={() => handleOpenEdit(ev)} className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors" title="Editar">
+                            <Pencil className="h-3.5 w-3.5" />
                           </button>
                           <button onClick={() => handleDeleteEvent(ev.id)} className="rounded p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
                             <Trash2 className="h-3.5 w-3.5" />
@@ -467,10 +524,10 @@ export default function CoordinadorHomePage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showCreateEvent} onOpenChange={setShowCreateEvent}>
+      <Dialog open={showCreateEvent} onOpenChange={(open) => { setShowCreateEvent(open); if (!open) { setEditingEvent(null); setEventForm({ title: "", content: "", type: "comunicado", eventDate: "", targetRoles: [], pinned: false }) } }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Nuevo comunicado / evento</DialogTitle>
+            <DialogTitle>{editingEvent ? "Editar comunicado" : "Nuevo comunicado / evento"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
@@ -503,10 +560,10 @@ export default function CoordinadorHomePage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateEvent(false)}>Cancelar</Button>
-            <Button onClick={handleCreateEvent} disabled={saving}>
+            <Button variant="outline" onClick={() => { setShowCreateEvent(false); setEditingEvent(null); setEventForm({ title: "", content: "", type: "comunicado", eventDate: "", targetRoles: [], pinned: false }) }}>Cancelar</Button>
+            <Button onClick={editingEvent ? handleUpdateEvent : handleCreateEvent} disabled={saving}>
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Publicar
+              {editingEvent ? "Guardar cambios" : "Publicar"}
             </Button>
           </DialogFooter>
         </DialogContent>

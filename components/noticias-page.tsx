@@ -161,9 +161,12 @@ interface CalendarNoteCardProps {
   note: Note
   onEdit: (note: Note) => void
   onDelete: (note: Note) => void
+  currentUserId: string
+  canManageAll: boolean
 }
 
-function CalendarNoteCard({ note, onEdit, onDelete }: CalendarNoteCardProps) {
+function CalendarNoteCard({ note, onEdit, onDelete, currentUserId, canManageAll }: CalendarNoteCardProps) {
+  const canEdit = canManageAll || note.authorId === currentUserId
   const cat = CATEGORY_CONFIG[note.category] ?? CATEGORY_CONFIG.general
   const [menuOpen, setMenuOpen] = useState(false)
   const time = format(new Date(note.createdAt), "HH:mm")
@@ -218,7 +221,7 @@ function CalendarNoteCard({ note, onEdit, onDelete }: CalendarNoteCardProps) {
 
         {/* Kebab */}
         <div className="relative flex-shrink-0">
-          <button
+          {canEdit && <button
             onClick={(e) => {
               e.stopPropagation()
               setMenuOpen((o) => !o)
@@ -226,7 +229,7 @@ function CalendarNoteCard({ note, onEdit, onDelete }: CalendarNoteCardProps) {
             className="opacity-0 group-hover:opacity-100 rounded p-0.5 text-slate-400 hover:text-foreground hover:bg-accent dark:hover:bg-accent transition-all"
           >
             <MoreHorizontal className="h-3 w-3" />
-          </button>
+          </button>}
           {menuOpen && (
             <div
               className="absolute right-0 top-full mt-1 z-20 min-w-[110px] rounded-xl border border-border bg-card shadow-lg dark:border-border dark:bg-popover py-1"
@@ -590,6 +593,8 @@ export function NoticiasPage() {
                             note={note}
                             onEdit={openEdit}
                             onDelete={setDeleteTarget}
+                            currentUserId={user?.id ?? ""}
+                            canManageAll={canCreateAll}
                           />
                         ))
                       )}

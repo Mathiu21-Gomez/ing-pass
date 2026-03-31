@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import { AdminSidebar } from "@/components/admin-sidebar"
 import { TimerAlerts } from "@/components/timer-alerts"
+import { TaskNotificationsBell } from "@/components/task-notifications-bell"
 import { toast } from "sonner"
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -96,23 +97,24 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <div className="flex flex-1 flex-col overflow-hidden">
 
         {/* Top bar corporativo */}
-        <header className="hidden md:flex h-14 items-center justify-between border-b border-border/50 bg-surface-1/80 backdrop-blur-xl px-6">
-          <div className="flex items-center gap-3">
-            <h2 className="text-sm font-semibold text-foreground">
+        <header className="header-glass hidden md:flex h-14 items-center justify-between px-6">
+          <div className="flex items-center gap-2">
+            <div className="h-4 w-0.5 rounded-full bg-sidebar-primary/40" />
+            <h2 className="text-sm font-semibold text-foreground tracking-tight">
               {getPageTitle()}
             </h2>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 rounded-lg bg-muted px-3 py-1.5">
-              <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse-soft" />
-              <span className="text-xs font-medium text-muted-foreground">Sistema activo</span>
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/8 px-2.5 py-1">
+              <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse-soft" />
+              <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">Sistema activo</span>
             </div>
-            <span className="text-xs text-muted-foreground">
+            <TaskNotificationsBell basePath="/admin/tareas" />
+            <span className="text-[11px] text-muted-foreground/50 select-none tabular-nums">
               {new Date().toLocaleDateString("es-CL", {
                 weekday: "long",
                 day: "numeric",
                 month: "long",
-                year: "numeric",
               })}
             </span>
           </div>

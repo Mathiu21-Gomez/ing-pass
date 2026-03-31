@@ -362,3 +362,199 @@
 .list-enter > * {
   animation: fade-in-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
+
+.list-enter > *:nth-child(1)  { animation-delay: 0ms; }
+.list-enter > *:nth-child(2)  { animation-delay: 40ms; }
+.list-enter > *:nth-child(3)  { animation-delay: 80ms; }
+.list-enter > *:nth-child(4)  { animation-delay: 120ms; }
+.list-enter > *:nth-child(5)  { animation-delay: 160ms; }
+.list-enter > *:nth-child(6)  { animation-delay: 200ms; }
+.list-enter > *:nth-child(7)  { animation-delay: 240ms; }
+.list-enter > *:nth-child(8)  { animation-delay: 280ms; }
+
+/* Skeleton blocks con delay para que no aparezcan de a uno */
+.skeleton-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.skeleton-stagger > *:nth-child(2) { animation-delay: 80ms; }
+.skeleton-stagger > *:nth-child(3) { animation-delay: 160ms; }
+
+/* ============================================
+   DESIGN SYSTEM — Global refinements
+   ============================================ */
+
+/* Scrollbar corporativo */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
+}
+
+/* Admin / Coordinador — content area con fondo sutil */
+.admin-content-bg {
+  background: linear-gradient(
+    180deg,
+    hsl(var(--background)) 0%,
+    hsl(210 30% 97%) 100%
+  );
+}
+.dark .admin-content-bg {
+  background: hsl(var(--background));
+}
+
+/* Glass card — efecto glassmorphism refinado */
+.glass-card {
+  background: hsl(var(--card) / 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid hsl(var(--border) / 0.6);
+}
+.dark .glass-card {
+  background: hsl(var(--card) / 0.5);
+  border-color: hsl(var(--border) / 0.4);
+}
+
+/* Sidebar nav item — active glow refinado */
+.nav-item-active {
+  position: relative;
+  background: linear-gradient(
+    135deg,
+    hsl(var(--sidebar-accent)) 0%,
+    hsl(var(--sidebar-primary) / 0.08) 100%
+  );
+}
+.nav-item-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 70%;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(180deg, hsl(var(--sidebar-primary)), hsl(var(--sidebar-primary) / 0.6));
+  box-shadow: 2px 0 8px hsl(var(--sidebar-primary) / 0.3);
+}
+
+/* Header glassmorphism refinado */
+.header-glass {
+  background: hsl(var(--surface-1) / 0.85);
+  backdrop-filter: blur(20px) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  border-bottom: 1px solid hsl(var(--border) / 0.5);
+  box-shadow: 0 1px 0 0 hsl(var(--border) / 0.3), 0 2px 12px -2px hsl(0 0% 0% / 0.04);
+}
+.dark .header-glass {
+  background: hsl(var(--surface-1) / 0.75);
+  box-shadow: 0 1px 0 0 hsl(var(--border) / 0.2), 0 4px 20px -4px hsl(0 0% 0% / 0.3);
+}
+
+/* Sidebar refinado */
+.sidebar-glass {
+  background: hsl(var(--sidebar-background) / 0.98);
+  border-right: 1px solid hsl(var(--sidebar-border) / 0.7);
+  box-shadow: 1px 0 0 0 hsl(var(--sidebar-border) / 0.3), 4px 0 24px -4px hsl(0 0% 0% / 0.05);
+}
+.dark .sidebar-glass {
+  background: hsl(var(--sidebar-background));
+  box-shadow: 1px 0 0 0 hsl(var(--sidebar-border) / 0.5), 4px 0 24px -4px hsl(0 0% 0% / 0.3);
+}
+
+/* Stat card con acento superior */
+.stat-card-accent {
+  position: relative;
+  overflow: hidden;
+}
+.stat-card-accent::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--primary) / 0.3));
+  border-radius: 99px 99px 0 0;
+}
+
+/* Tag pill con hover */
+.tag-pill {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.tag-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px -2px currentColor;
+}
+
+/* Page title con gradient sutil */
+.page-title-gradient {
+  background: linear-gradient(135deg, hsl(var(--foreground)) 0%, hsl(var(--foreground) / 0.7) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Input focus ring más refinado */
+.input-ring:focus-within {
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.1), 0 0 0 1px hsl(var(--primary) / 0.3);
+}
+
+/* Subtle mesh background para content areas */
+.mesh-bg {
+  background-image:
+    radial-gradient(at 20% 20%, hsl(var(--primary) / 0.04) 0px, transparent 50%),
+    radial-gradient(at 80% 80%, hsl(160 60% 45% / 0.03) 0px, transparent 50%);
+}
+
+/* Badge con pulse para notificaciones */
+@keyframes badge-pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  60% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.badge-pop {
+  animation: badge-pop 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Worker nav active underline animation */
+@keyframes underline-grow {
+  from { width: 0; opacity: 0; }
+  to { width: 1rem; opacity: 1; }
+}
+.nav-underline {
+  animation: underline-grow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Hover con lift para elementos interactivos */
+.hover-lift {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px -4px hsl(0 0% 0% / 0.1);
+}
+.dark .hover-lift:hover {
+  box-shadow: 0 6px 20px -4px hsl(0 0% 0% / 0.35);
+}
+
+/* Sidebar section label */
+.sidebar-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: hsl(var(--sidebar-foreground) / 0.3);
+  padding: 0 1rem;
+  margin: 0.5rem 0 0.25rem;
+}
+
+/* Improved stagger for large grids */
+.stagger-children > *:nth-child(n+9) {
+  animation-delay: 480ms;
+}

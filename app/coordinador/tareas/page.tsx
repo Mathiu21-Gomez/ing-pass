@@ -1,9 +1,12 @@
 "use client"
 
-import { useState, useCallback, useEffect, useRef } from "react"
+import { useState, useCallback, useEffect, useRef, Suspense } from "react"
+import { useSearchParams } from "next/navigation"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { ExportDialog } from "@/components/export-dialog"
-import type { Task, TaskStatus, Project, User, Tag, Comment, Activity } from "@/lib/types"
+import type { Task, TaskStatus, Project, User, Tag, Activity } from "@/lib/types"
+import { ChatPanel } from "@/components/chat-panel"
+import { SharedLinksPanel } from "@/components/shared-links-panel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,6 +16,7 @@ import { Progress } from "@/components/ui/progress"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -42,14 +46,12 @@ import {
   ChevronDown,
   ChevronRight,
   MessageSquare,
-  Send,
   CheckCircle2,
   Circle,
   Bell,
   Tag as TagIcon,
   X,
   Pencil,
-  ArrowUpDown,
   AlertCircle,
   Clock,
   CheckCheck,
@@ -73,6 +75,8 @@ const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; icon: Re
 const STATUS_ORDER = (Object.keys(STATUS_CONFIG) as TaskStatus[]).sort(
   (a, b) => STATUS_CONFIG[a].order - STATUS_CONFIG[b].order
 )
+
+const TAG_PRESET_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#3b82f6","#ef4444","#8b5cf6","#14b8a6","#f97316","#64748b"]
 
 // ─── Tag Badge ─────────────────────────────────────────────────
 function TagBadge({ tag, onRemove }: { tag: Tag; onRemove?: () => void }) {
@@ -153,11 +157,14 @@ function AlertDialog({
 }
 
 // ─── Task Detail Panel (inline expandible) ────────────────────
+type CoordinatorTaskTab = "detalles" | "checklist" | "enlaces" | "comentarios"
+
 function TaskDetailPanel({
   task,
   allUsers,
   availableTags,
   isOpen,
+  defaultTab = "detalles",
   onUpdate,
   onTagsUpdate,
 }: {
@@ -165,14 +172,11 @@ function TaskDetailPanel({
   allUsers: User[]
   availableTags: Tag[]
   isOpen: boolean
+  defaultTab?: CoordinatorTaskTab
   onUpdate: (taskId: string, updates: Partial<Task>) => void
   onTagsUpdate: (taskId: string, tags: Tag[]) => void
 }) {
   const { user } = useAuth()
-  const [comments, setComments] = useState<Comment[]>([])
-  const [commentText, setCommentText] = useState("")
-  const [commentsLoading, setCommentsLoading] = useState(true)
-  const [sortDesc, setSortDesc] = useState(true)
   const [showAlertForm, setShowAlertForm] = useState(false)
   const [showTagSelector, setShowTagSelector] = useState(false)
   const [editingDescription, setEditingDescription] = useState(false)
@@ -183,26 +187,23 @@ function TaskDetailPanel({
   const [activities, setActivities] = useState<Activity[]>(task.activities)
   const [newCheckItem, setNewCheckItem] = useState("")
   const [addingCheckItem, setAddingCheckItem] = useState(false)
+  const [activeTab, setActiveTab] = useState<CoordinatorTaskTab>(defaultTab)
+  const [mentionableUsers, setMentionableUsers] = useState<{ id: string; name: string }[]>([])
 
   useEffect(() => {
     if (!isOpen) return
-    const load = async () => {
-      setCommentsLoading(true)
-      try {
-        const res = await fetch(`/api/tasks/${task.id}/comments`)
-        if (res.ok) setComments(await res.json())
-      } finally {
-        setCommentsLoading(false)
-      }
-    }
-    load()
+
+    fetch(`/api/tasks/${task.id}/mentionable`)
+      .then((response) => (response.ok ? response.json() : []))
+      .then((data) => setMentionableUsers(Array.isArray(data) ? data : []))
+      .catch(() => setMentionableUsers([]))
   }, [isOpen, task.id])
 
-  const sortedComments = [...comments].sort((a, b) =>
-    sortDesc
-      ? b.createdAt.localeCompare(a.createdAt)
-      : a.createdAt.localeCompare(b.createdAt)
-  )
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(defaultTab)
+    }
+  }, [defaultTab, isOpen, task.id])
 
   async function handleStatusChange(newStatus: TaskStatus) {
     try {
@@ -245,22 +246,6 @@ function TaskDetailPanel({
       toast.success("Pautas actualizadas")
     } catch {
       toast.error("Error al actualizar")
-    }
-  }
-
-  async function handleAddComment() {
-    if (!commentText.trim() || !user) return
-    try {
-      const res = await fetch(`/api/tasks/${task.id}/comments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: commentText.trim(), authorId: user.id, parentType: "task" }),
-      })
-      const newComment = await res.json()
-      setComments((prev) => [...prev, newComment])
-      setCommentText("")
-    } catch {
-      toast.error("Error al agregar comentario")
     }
   }
 
@@ -364,7 +349,7 @@ function TaskDetailPanel({
           </div>
 
           {/* ── Tabs ── */}
-          <Tabs defaultValue="detalles" className="flex flex-col">
+          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as CoordinatorTaskTab)} className="flex flex-col">
             <TabsList className="w-full rounded-none border-b h-10 bg-transparent px-5 justify-start gap-1 shrink-0">
               <TabsTrigger value="detalles" className="text-xs h-8 px-3 data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none">
                 Detalles
@@ -372,8 +357,11 @@ function TaskDetailPanel({
               <TabsTrigger value="checklist" className="text-xs h-8 px-3 data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none">
                 Checklist {activities.length > 0 && <span className="ml-1 text-[10px] text-muted-foreground">({completedCount}/{activities.length})</span>}
               </TabsTrigger>
+              <TabsTrigger value="enlaces" className="text-xs h-8 px-3 data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none">
+                Enlaces
+              </TabsTrigger>
               <TabsTrigger value="comentarios" className="text-xs h-8 px-3 data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none">
-                Comentarios {comments.length > 0 && <span className="ml-1 text-[10px] text-muted-foreground">({comments.length})</span>}
+                Comentarios
               </TabsTrigger>
             </TabsList>
 
@@ -522,50 +510,30 @@ function TaskDetailPanel({
               </div>
             </TabsContent>
 
+            {/* Tab: Enlaces */}
+            <TabsContent value="enlaces" className="mt-0">
+              {isOpen && (
+                <div className="px-5 py-4">
+                  <SharedLinksPanel apiBase={`/api/tasks/${task.id}`} />
+                </div>
+              )}
+            </TabsContent>
+
             {/* Tab: Comentarios */}
-            <TabsContent value="comentarios" className="mt-0 flex flex-col">
-              <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-                <p className="text-xs text-muted-foreground">{comments.length} comentario{comments.length !== 1 ? "s" : ""}</p>
-                <Button variant="ghost" size="sm" className="h-6 text-xs px-2 gap-1" onClick={() => setSortDesc(!sortDesc)}>
-                  <ArrowUpDown className="h-3 w-3" />
-                  {sortDesc ? "Más reciente" : "Más antiguo"}
-                </Button>
-              </div>
-              <div className="px-5 space-y-3 pb-2 max-h-64 overflow-y-auto">
-                {commentsLoading ? (
-                  <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-                ) : sortedComments.length === 0 ? (
-                  <p className="text-sm text-muted-foreground/40 italic text-center py-10">Sin comentarios aún</p>
-                ) : (
-                  sortedComments.map((c) => {
-                    const author = allUsers.find((u) => u.id === c.authorId)
-                    return (
-                      <div key={c.id} className="flex gap-3">
-                        <div className="h-7 w-7 rounded-full bg-primary/10 border border-primary/10 flex items-center justify-center text-[10px] font-bold text-primary shrink-0 mt-0.5">
-                          {author?.name?.charAt(0) ?? "?"}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-baseline gap-2 mb-0.5">
-                            <span className="text-xs font-semibold">{author?.name?.split(" ")[0]}</span>
-                            <span className="text-[10px] text-muted-foreground">
-                              {new Date(c.createdAt).toLocaleString("es-CL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
-                            </span>
-                          </div>
-                          <p className="text-sm text-muted-foreground leading-relaxed">{c.text}</p>
-                        </div>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-              <div className="flex gap-2 px-5 py-3 border-t shrink-0">
-                <Input value={commentText} onChange={(e) => setCommentText(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleAddComment()}
-                  placeholder="Escribir comentario..." className="h-9" />
-                <Button size="sm" className="h-9 px-3" onClick={handleAddComment} disabled={!commentText.trim()}>
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
+            <TabsContent value="comentarios" className="mt-0">
+              {isOpen && (
+                <div className="px-5 py-4">
+                  <ChatPanel
+                    taskId={task.id}
+                    useTaskChat={true}
+                    mentionableUsers={mentionableUsers}
+                    title="Chat de tarea"
+                    placeholder="Escribí un mensaje... (@ para mencionar)"
+                    allowImages={true}
+                    className="mt-2"
+                  />
+                </div>
+              )}
             </TabsContent>
           </Tabs>
 
@@ -582,6 +550,8 @@ function StatusGroup({
   allUsers,
   availableTags,
   expandedTaskId,
+  defaultOpenTaskId,
+  defaultTab,
   onToggleTask,
   onUpdate,
   onTagsUpdate,
@@ -591,6 +561,8 @@ function StatusGroup({
   allUsers: User[]
   availableTags: Tag[]
   expandedTaskId: string | null
+  defaultOpenTaskId: string | null
+  defaultTab: CoordinatorTaskTab
   onToggleTask: (id: string) => void
   onUpdate: (taskId: string, updates: Partial<Task>) => void
   onTagsUpdate: (taskId: string, tags: Tag[]) => void
@@ -696,6 +668,7 @@ function StatusGroup({
                   task={task}
                   allUsers={allUsers}
                   availableTags={availableTags.filter((t) => t.projectId === null || t.projectId === task._projectId)}
+                  defaultTab={defaultOpenTaskId === task.id ? defaultTab : "detalles"}
                   onUpdate={onUpdate}
                   onTagsUpdate={onTagsUpdate}
                 />
@@ -715,8 +688,9 @@ function StatusGroup({
 }
 
 // ─── Main Page ─────────────────────────────────────────────────
-export default function CoordinadorTareasPage() {
+function CoordinadorTareasPageContent() {
   const { user } = useAuth()
+  const searchParams = useSearchParams()
   const [projects, setProjects] = useState<Project[]>([])
   const [allUsers, setAllUsers] = useState<User[]>([])
   const [availableTags, setAvailableTags] = useState<Tag[]>([])
@@ -730,6 +704,13 @@ export default function CoordinadorTareasPage() {
 
   // Expanded task (inline panel)
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
+  const handledTargetRef = useRef<string | null>(null)
+  const handledNotificationRef = useRef<string | null>(null)
+
+  const requestedTaskId = searchParams.get("task")
+  const requestedNotificationId = searchParams.get("notification")
+  const requestedTab: CoordinatorTaskTab =
+    searchParams.get("tab") === "chat" ? "comentarios" : "detalles"
 
   // Create task dialog
   const [showCreate, setShowCreate] = useState(false)
@@ -767,6 +748,19 @@ export default function CoordinadorTareasPage() {
     load()
   }, [])
 
+  useEffect(() => {
+    if (!requestedNotificationId || handledNotificationRef.current === requestedNotificationId) {
+      return
+    }
+
+    handledNotificationRef.current = requestedNotificationId
+    fetch("/api/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [requestedNotificationId] }),
+    }).catch(() => {})
+  }, [requestedNotificationId])
+
   const myProjects = projects.filter((p) => p.coordinatorId === user?.id || user?.role === "admin")
   const workers = allUsers.filter((u) => u.active)
   const selectedProject = myProjects.find((p) => p.id === createForm.projectId)
@@ -778,6 +772,26 @@ export default function CoordinadorTareasPage() {
   const allTasks = myProjects.flatMap((p) =>
     (p.tasks ?? []).map((t) => ({ ...t, _projectId: p.id, _projectName: p.name }))
   )
+
+  useEffect(() => {
+    if (loading || !requestedTaskId) {
+      if (!requestedTaskId) handledTargetRef.current = null
+      return
+    }
+
+    const targetTask = allTasks.find((task) => task.id === requestedTaskId)
+    if (!targetTask) return
+
+    const navigationKey = `${requestedTaskId}:${requestedTab}`
+    if (handledTargetRef.current === navigationKey) return
+
+    handledTargetRef.current = navigationKey
+    setFilterProject("all")
+    setFilterTag("all")
+    setFilterUser("all")
+    setSearch("")
+    setExpandedTaskId(requestedTaskId)
+  }, [allTasks, loading, requestedTaskId, requestedTab])
 
   // Apply filters
   const filteredTasks = allTasks.filter((t) => {
@@ -854,7 +868,7 @@ export default function CoordinadorTareasPage() {
       const res = await fetch("/api/tags", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newTagName.trim(), color: newTagColor, projectId: tagProjectId || null }),
+        body: JSON.stringify({ name: newTagName.trim(), color: newTagColor, projectId: tagProjectId === "__global__" || !tagProjectId ? null : tagProjectId }),
       })
       const tag = await res.json()
       setAvailableTags((prev) => [...prev, tag])
@@ -865,10 +879,36 @@ export default function CoordinadorTareasPage() {
     }
   }
 
+  async function handleDeleteTag(tagId: string) {
+    try {
+      await fetch(`/api/tags/${tagId}`, { method: "DELETE" })
+      setAvailableTags((prev) => prev.filter((t) => t.id !== tagId))
+      toast.success("Etiqueta eliminada")
+    } catch {
+      toast.error("Error al eliminar etiqueta")
+    }
+  }
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-48">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      <div className="space-y-5 animate-fade-in">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <div className="h-7 w-32 rounded-lg skeleton-shimmer" />
+            <div className="h-4 w-48 rounded skeleton-shimmer" />
+          </div>
+          <div className="h-9 w-28 rounded-md skeleton-shimmer" />
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-20 rounded-xl skeleton-shimmer" />
+          ))}
+        </div>
+        <div className="space-y-3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="h-16 rounded-xl skeleton-shimmer" />
+          ))}
+        </div>
       </div>
     )
   }
@@ -944,6 +984,8 @@ export default function CoordinadorTareasPage() {
             allUsers={allUsers}
             availableTags={availableTags}
             expandedTaskId={expandedTaskId}
+            defaultOpenTaskId={requestedTaskId}
+            defaultTab={requestedTab}
             onToggleTask={handleToggleTask}
             onUpdate={handleTaskUpdate}
             onTagsUpdate={handleTagsUpdate}
@@ -1042,52 +1084,114 @@ export default function CoordinadorTareasPage() {
 
       {/* Tag Manager Dialog */}
       <Dialog open={showTagManager} onOpenChange={setShowTagManager}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Gestión de Etiquetas</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Crear nueva etiqueta</Label>
-              <div className="flex gap-2">
-                <Input
-                  value={newTagName}
-                  onChange={(e) => setNewTagName(e.target.value)}
-                  placeholder="Nombre de la etiqueta"
-                  className="flex-1"
-                />
-                <input
-                  type="color"
-                  value={newTagColor}
-                  onChange={(e) => setNewTagColor(e.target.value)}
-                  className="h-10 w-10 rounded border cursor-pointer"
-                />
-                <Button onClick={handleCreateTag} disabled={!newTagName.trim()} size="sm" className="h-10">
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Proyecto (opcional — dejar vacío para global)</Label>
-                <Select value={tagProjectId} onValueChange={setTagProjectId}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Global (todos los proyectos)" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">Global</SelectItem>
-                    {myProjects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Gestión de Etiquetas</DialogTitle>
+            <DialogDescription className="text-xs">Creá y organizá las etiquetas para clasificar tareas.</DialogDescription>
+          </DialogHeader>
+
+          {/* Form */}
+          <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Nueva etiqueta</p>
+            <div className="flex gap-2">
+              <Input
+                value={newTagName}
+                onChange={(e) => setNewTagName(e.target.value)}
+                placeholder="Nombre de la etiqueta"
+                className="flex-1"
+                onKeyDown={(e) => { if (e.key === "Enter") handleCreateTag() }}
+              />
+              <input
+                type="color"
+                value={newTagColor}
+                onChange={(e) => setNewTagColor(e.target.value)}
+                className="h-9 w-9 rounded-md border cursor-pointer p-0.5 bg-transparent"
+              />
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Etiquetas existentes</Label>
-              <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
-                {availableTags.map((tag) => <TagBadge key={tag.id} tag={tag} />)}
-                {availableTags.length === 0 && <span className="text-xs text-muted-foreground/50">Sin etiquetas</span>}
+            <div className="flex gap-1.5 flex-wrap">
+              {TAG_PRESET_COLORS.map((color) => (
+                <button
+                  key={color}
+                  onClick={() => setNewTagColor(color)}
+                  className={cn("h-5 w-5 rounded-full border-2 transition-transform hover:scale-110", newTagColor === color ? "border-foreground scale-110" : "border-transparent")}
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </div>
+            <Select value={tagProjectId} onValueChange={setTagProjectId}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="Global — todos los proyectos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__global__">Global — todos los proyectos</SelectItem>
+                {myProjects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <div className="flex items-center justify-between pt-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-muted-foreground">Preview:</span>
+                {newTagName.trim()
+                  ? <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium text-white" style={{ backgroundColor: newTagColor }}>{newTagName}</span>
+                  : <span className="text-[11px] text-muted-foreground/40 italic">ingresá un nombre</span>
+                }
               </div>
+              <Button onClick={handleCreateTag} disabled={!newTagName.trim()} size="sm">
+                <Plus className="h-3.5 w-3.5 mr-1" /> Crear
+              </Button>
             </div>
           </div>
+
+          {/* Existing tags */}
+          {availableTags.length > 0 ? (
+            <div className="space-y-3 max-h-52 overflow-y-auto pr-1">
+              {availableTags.filter((t) => t.projectId === null).length > 0 && (
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">Global</p>
+                  <div className="space-y-0.5">
+                    {availableTags.filter((t) => t.projectId === null).map((tag) => (
+                      <div key={tag.id} className="flex items-center justify-between rounded-md px-2 py-1.5 hover:bg-muted/40 group">
+                        <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium text-white" style={{ backgroundColor: tag.color }}>{tag.name}</span>
+                        <button onClick={() => handleDeleteTag(tag.id)} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all p-1 rounded">
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {myProjects.filter((p) => availableTags.some((t) => t.projectId === p.id)).map((project) => (
+                <div key={project.id}>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">{project.name}</p>
+                  <div className="space-y-0.5">
+                    {availableTags.filter((t) => t.projectId === project.id).map((tag) => (
+                      <div key={tag.id} className="flex items-center justify-between rounded-md px-2 py-1.5 hover:bg-muted/40 group">
+                        <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium text-white" style={{ backgroundColor: tag.color }}>{tag.name}</span>
+                        <button onClick={() => handleDeleteTag(tag.id)} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all p-1 rounded">
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-6 text-muted-foreground/50 text-sm">Sin etiquetas todavía</div>
+          )}
+
           <DialogFooter>
-            <Button onClick={() => setShowTagManager(false)}>Cerrar</Button>
+            <Button variant="outline" onClick={() => setShowTagManager(false)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+export default function CoordinadorTareasPage() {
+  return (
+    <Suspense>
+      <CoordinadorTareasPageContent />
+    </Suspense>
   )
 }

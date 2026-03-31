@@ -34,11 +34,11 @@ import {
   Circle,
   AlertCircle,
   Loader2,
+  Pencil,
   Trash2,
   Users,
   FolderKanban,
   Play,
-  Timer,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -120,6 +120,7 @@ export default function AdminHomePage() {
   const [loadingTasks, setLoadingTasks] = useState(false)
 
   const [showCreateEvent, setShowCreateEvent] = useState(false)
+  const [editingEvent, setEditingEvent] = useState<AppEvent | null>(null)
   const [eventForm, setEventForm] = useState({
     title: "",
     content: "",
@@ -227,6 +228,42 @@ export default function AdminHomePage() {
     }
   }
 
+  function handleOpenEdit(ev: AppEvent) {
+    setEditingEvent(ev)
+    setEventForm({
+      title: ev.title,
+      content: ev.content ?? "",
+      type: ev.type,
+      eventDate: ev.eventDate ?? "",
+      targetRoles: ev.targetRoles ?? [],
+      pinned: ev.pinned,
+    })
+    setShowCreateEvent(true)
+  }
+
+  async function handleUpdateEvent() {
+    if (!eventForm.title.trim() || !editingEvent) return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/events/${editingEvent.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(eventForm),
+      })
+      if (!res.ok) throw new Error()
+      const updated = await res.json()
+      setEvents((prev) => prev.map((e) => (e.id === editingEvent.id ? updated : e)))
+      setShowCreateEvent(false)
+      setEditingEvent(null)
+      setEventForm({ title: "", content: "", type: "comunicado", eventDate: "", targetRoles: [], pinned: false })
+      toast.success("Comunicado actualizado")
+    } catch {
+      toast.error("Error al actualizar comunicado")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function handleTogglePin(ev: AppEvent) {
     try {
       const res = await fetch(`/api/events/${ev.id}`, {
@@ -254,16 +291,32 @@ export default function AdminHomePage() {
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-6 animate-fade-in">
+        <div className="flex items-start justify-between">
+          <div className="space-y-2">
+            <div className="h-8 w-52 rounded-lg skeleton-shimmer" />
+            <div className="h-4 w-64 rounded skeleton-shimmer" />
+          </div>
+          <div className="h-9 w-40 rounded-md skeleton-shimmer" />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="space-y-4">
+            <div className="h-44 rounded-xl skeleton-shimmer" />
+            <div className="h-36 rounded-xl skeleton-shimmer" />
+          </div>
+          <div className="lg:col-span-2 space-y-4">
+            <div className="h-36 rounded-xl skeleton-shimmer" />
+            <div className="h-56 rounded-xl skeleton-shimmer" />
+          </div>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 page-enter">
       {/* Header row */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between animate-fade-in-up">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
             {greeting}, {user?.name?.split(" ")[0]}
@@ -277,7 +330,7 @@ export default function AdminHomePage() {
             })}
           </p>
         </div>
-        <Button onClick={() => setShowCreateEvent(true)} size="sm">
+        <Button onClick={() => setShowCreateEvent(true)} size="sm" className="btn-press">
           <Plus className="h-4 w-4 mr-1.5" />
           Nuevo comunicado
         </Button>
@@ -285,7 +338,7 @@ export default function AdminHomePage() {
 
       {/* Pending alerts banner */}
       {pendingAlerts.length > 0 && (
-        <div className="flex items-center gap-3 rounded-xl border border-orange-500/30 bg-orange-500/10 p-4">
+        <div className="flex items-center gap-3 rounded-xl border border-orange-500/30 bg-orange-500/10 p-4 animate-fade-in-down">
           <Bell className="h-5 w-5 text-orange-600 dark:text-orange-400 shrink-0" />
           <p className="text-sm text-orange-700 dark:text-orange-300 font-medium">
             Tenés {pendingAlerts.length} alerta{pendingAlerts.length > 1 ? "s" : ""} pendiente{pendingAlerts.length > 1 ? "s" : ""} en tus tareas.
@@ -296,11 +349,11 @@ export default function AdminHomePage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 stagger-children">
         {/* Left column: widgets */}
         <div className="space-y-4">
           {/* Timer widget */}
-          <Card>
+          <Card className="card-hover">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <Clock className="h-4 w-4" />
@@ -317,19 +370,19 @@ export default function AdminHomePage() {
                   : "Tiempo de trabajo efectivo acumulado."}
               </p>
               {(status === "inactivo" || status === "finalizado") ? (
-                <Button onClick={handleOpenStartDialog} className="gap-1.5 w-full" size="sm">
+                <Button onClick={handleOpenStartDialog} className="gap-1.5 w-full btn-press" size="sm">
                   <Play className="h-4 w-4" />
                   Iniciar jornada
                 </Button>
               ) : (
                 <div className="flex flex-col items-center gap-3">
-                  <p className={cn("font-mono text-3xl font-bold tabular-nums", timerConfig.color)}>
+                  <p className={cn("font-mono text-3xl font-bold tabular-nums animate-count-up", timerConfig.color)}>
                     {formatTime(elapsedWorkSeconds)}
                   </p>
-                  <Link href="/admin/mi-jornada">
-                    <Button size="sm" variant="outline" className="gap-1.5 w-full">
-                      <Timer className="h-4 w-4" />
-                      Ir a Mi Jornada
+                  <Link href="/admin/tareas">
+                    <Button size="sm" variant="outline" className="gap-1.5 w-full btn-press">
+                      <AlertCircle className="h-4 w-4" />
+                      Ver mis tareas
                     </Button>
                   </Link>
                 </div>
@@ -338,7 +391,7 @@ export default function AdminHomePage() {
           </Card>
 
           {/* Quick stats */}
-          <Card>
+          <Card className="card-hover">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-muted-foreground">Resumen</CardTitle>
             </CardHeader>
@@ -348,21 +401,21 @@ export default function AdminHomePage() {
                   <FolderKanban className="h-4 w-4" />
                   Tareas asignadas
                 </div>
-                <span className="font-semibold text-foreground">{myTasks.length}</span>
+                <span className="font-semibold text-foreground number-pop">{myTasks.length}</span>
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Circle className="h-4 w-4" />
                   En progreso
                 </div>
-                <span className="font-semibold text-foreground">{activeTasks.length}</span>
+                <span className="font-semibold text-foreground number-pop">{activeTasks.length}</span>
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <CheckCircle2 className="h-4 w-4" />
                   Finalizadas
                 </div>
-                <span className="font-semibold text-foreground">
+                <span className="font-semibold text-foreground number-pop">
                   {myTasks.filter((t) => t.status === "finalizado").length}
                 </span>
               </div>
@@ -374,7 +427,7 @@ export default function AdminHomePage() {
         <div className="lg:col-span-2 space-y-4">
           {/* My tasks */}
           {activeTasks.length > 0 && (
-            <Card>
+            <Card className="card-hover">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4" />
@@ -382,11 +435,11 @@ export default function AdminHomePage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-2">
+                <div className="space-y-2 stagger-children">
                   {activeTasks.slice(0, 5).map((task) => (
                     <div
                       key={task.id}
-                      className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/30 px-3 py-2.5"
+                      className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/30 px-3 py-2.5 table-row-corporate"
                     >
                       <span className="text-xs font-mono text-muted-foreground">
                         #{task.correlativeId}
@@ -405,7 +458,7 @@ export default function AdminHomePage() {
           )}
 
           {/* Events feed */}
-          <Card>
+          <Card className="card-hover">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <Megaphone className="h-4 w-4" />
@@ -418,7 +471,7 @@ export default function AdminHomePage() {
                   No hay comunicados publicados aún.
                 </p>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-3 stagger-children">
                   {events.map((ev) => (
                     <div
                       key={ev.id}
@@ -426,7 +479,7 @@ export default function AdminHomePage() {
                         "rounded-xl border p-4 space-y-1.5 transition-colors",
                         ev.pinned
                           ? "border-primary/30 bg-primary/5"
-                          : "border-border bg-muted/30"
+                          : "border-border bg-muted/30 hover:bg-muted/50"
                       )}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -446,6 +499,13 @@ export default function AdminHomePage() {
                             title={ev.pinned ? "Desfijar" : "Fijar"}
                           >
                             <Pin className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenEdit(ev)}
+                            className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                            title="Editar"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
                           </button>
                           <button
                             onClick={() => handleDeleteEvent(ev.id)}
@@ -536,10 +596,10 @@ export default function AdminHomePage() {
       </Dialog>
 
       {/* Create event dialog */}
-      <Dialog open={showCreateEvent} onOpenChange={setShowCreateEvent}>
+      <Dialog open={showCreateEvent} onOpenChange={(open) => { setShowCreateEvent(open); if (!open) { setEditingEvent(null); setEventForm({ title: "", content: "", type: "comunicado", eventDate: "", targetRoles: [], pinned: false }) } }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Nuevo comunicado / evento</DialogTitle>
+            <DialogTitle>{editingEvent ? "Editar comunicado" : "Nuevo comunicado / evento"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
@@ -596,12 +656,12 @@ export default function AdminHomePage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateEvent(false)}>
+            <Button variant="outline" onClick={() => { setShowCreateEvent(false); setEditingEvent(null); setEventForm({ title: "", content: "", type: "comunicado", eventDate: "", targetRoles: [], pinned: false }) }}>
               Cancelar
             </Button>
-            <Button onClick={handleCreateEvent} disabled={saving}>
+            <Button onClick={editingEvent ? handleUpdateEvent : handleCreateEvent} disabled={saving}>
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Publicar
+              {editingEvent ? "Guardar cambios" : "Publicar"}
             </Button>
           </DialogFooter>
         </DialogContent>

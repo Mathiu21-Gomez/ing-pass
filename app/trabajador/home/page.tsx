@@ -2,23 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { useAuth } from "@/lib/contexts/auth-context"
-import { useTimer } from "@/lib/contexts/timer-context"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import {
-  Clock,
-  Bell,
-  Pin,
-  Megaphone,
-  CalendarDays,
-  CheckCircle2,
-  Timer,
-  Loader2,
-  ArrowRight,
-} from "lucide-react"
+import { Pin, Megaphone, CalendarDays, CheckCircle2, ArrowRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { WorkdayPanel } from "@/components/workday-panel"
 import Link from "next/link"
 
 interface AppEvent {
@@ -39,12 +27,6 @@ interface MyTask {
   tags: { id: string; name: string; color: string }[]
 }
 
-interface PendingAlert {
-  id: string
-  message: string
-  alertAt: string
-}
-
 const STATUS_LABEL: Record<string, string> = {
   pendiente: "Pendiente",
   en_curso: "En curso",
@@ -53,6 +35,16 @@ const STATUS_LABEL: Record<string, string> = {
   listo_para_revision: "Para revisión",
   finalizado: "Finalizado",
   retrasado: "Retrasado",
+}
+
+const STATUS_DOT: Record<string, string> = {
+  pendiente: "bg-slate-400",
+  en_curso: "bg-blue-500",
+  esperando_info: "bg-yellow-500",
+  bloqueado: "bg-red-500",
+  listo_para_revision: "bg-purple-500",
+  finalizado: "bg-emerald-500",
+  retrasado: "bg-orange-500",
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -65,22 +57,11 @@ const STATUS_STYLE: Record<string, string> = {
   retrasado: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
 }
 
-const TIMER_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  trabajando: { label: "Trabajando", color: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" },
-  colacion: { label: "En Colación", color: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20" },
-  pausado: { label: "Pausado", color: "bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/20" },
-  reunion: { label: "En Reunión", color: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20" },
-  finalizado: { label: "Jornada Finalizada", color: "bg-muted text-muted-foreground border-border" },
-  inactivo: { label: "Sin iniciar", color: "bg-muted text-muted-foreground border-border" },
-}
-
 export default function TrabajadorHomePage() {
   const { user } = useAuth()
-  const { status, elapsedWorkSeconds, formatTime } = useTimer()
 
   const [events, setEvents] = useState<AppEvent[]>([])
   const [myTasks, setMyTasks] = useState<MyTask[]>([])
-  const [pendingAlerts, setPendingAlerts] = useState<PendingAlert[]>([])
   const [loading, setLoading] = useState(true)
 
   const fetchHomeData = useCallback(async () => {
@@ -90,7 +71,6 @@ export default function TrabajadorHomePage() {
       const data = await res.json()
       setEvents(data.events ?? [])
       setMyTasks(data.myTasks ?? [])
-      setPendingAlerts(data.pendingAlerts ?? [])
     } catch {
       toast.error("Error al cargar datos de inicio")
     } finally {
@@ -100,30 +80,44 @@ export default function TrabajadorHomePage() {
 
   useEffect(() => { fetchHomeData() }, [fetchHomeData])
 
-  const timerConfig = TIMER_STATUS_CONFIG[status] ?? TIMER_STATUS_CONFIG.inactivo
   const greeting = (() => {
     const h = new Date().getHours()
     if (h < 12) return "Buenos días"
     if (h < 18) return "Buenas tardes"
     return "Buenas noches"
   })()
-  const activeTasks = myTasks.filter((t) => !["finalizado"].includes(t.status))
+
+  const activeTasks = myTasks.filter((t) => t.status !== "finalizado")
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-6 animate-fade-in">
+        <div className="space-y-2">
+          <div className="h-8 w-48 rounded-lg skeleton-shimmer" />
+          <div className="h-4 w-56 rounded skeleton-shimmer" />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          <div className="lg:col-span-2">
+            <div className="h-72 rounded-xl skeleton-shimmer" />
+          </div>
+          <div className="lg:col-span-3 space-y-4">
+            <div className="h-40 rounded-xl skeleton-shimmer" />
+            <div className="h-32 rounded-xl skeleton-shimmer" />
+          </div>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">
+    <div className="space-y-6 page-enter">
+
+      {/* Header */}
+      <div className="space-y-0.5 animate-fade-in-up">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           {greeting}, {user?.name?.split(" ")[0]}
         </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
+        <p className="text-sm text-muted-foreground capitalize">
           {new Date().toLocaleDateString("es-CL", {
             weekday: "long",
             day: "numeric",
@@ -133,138 +127,122 @@ export default function TrabajadorHomePage() {
         </p>
       </div>
 
-      {pendingAlerts.length > 0 && (
-        <div className="flex items-center gap-3 rounded-xl border border-orange-500/30 bg-orange-500/10 p-4">
-          <Bell className="h-5 w-5 text-orange-600 dark:text-orange-400 shrink-0" />
-          <p className="text-sm text-orange-700 dark:text-orange-300 font-medium">
-            Tenés {pendingAlerts.length} alerta{pendingAlerts.length > 1 ? "s" : ""} pendiente{pendingAlerts.length > 1 ? "s" : ""} en tus tareas.
-          </p>
+      {/* Main layout: timer izquierda, tareas + novedades derecha */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start stagger-children">
+
+        {/* Jornada — columna izquierda */}
+        <div className="lg:col-span-2">
+          <WorkdayPanel timerOnly />
         </div>
-      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="space-y-4">
-          {/* Timer widget — prominent for workers */}
-          <Card className={cn(status === "trabajando" && "border-emerald-500/40 bg-emerald-500/5")}>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <Clock className="h-4 w-4" />
-                Mi Jornada
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium", timerConfig.color)}>
-                {timerConfig.label}
-              </span>
+        {/* Tareas + Novedades — columna derecha */}
+        <div className="lg:col-span-3 flex flex-col gap-6">
 
-              {status !== "inactivo" ? (
-                <div>
-                  <p className="text-4xl font-mono font-bold text-foreground tabular-nums">
-                    {formatTime(elapsedWorkSeconds)}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">Tiempo de trabajo efectivo</p>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Aún no iniciaste tu jornada de hoy.
-                </p>
-              )}
-
-              <Link href="/trabajador/mi-jornada">
-                <Button className="w-full" variant={status === "inactivo" ? "default" : "outline"} size="sm">
-                  <Timer className="h-4 w-4 mr-2" />
-                  {status === "inactivo" ? "Iniciar Jornada" : "Ver Jornada Completa"}
-                  <ArrowRight className="h-4 w-4 ml-auto" />
-                </Button>
+          {/* Tareas activas */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                  Tareas activas
+                </span>
+                {activeTasks.length > 0 && (
+                  <span className="flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-primary/15 px-1.5 text-[10px] font-bold text-primary animate-scale-in">
+                    {activeTasks.length}
+                  </span>
+                )}
+              </div>
+              <Link
+                href="/trabajador/tareas"
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors group"
+              >
+                Ver todas
+                <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
               </Link>
-            </CardContent>
-          </Card>
+            </div>
 
-          {/* Task summary */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4" />
-                Mis tareas
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Activas</span>
-                <span className="font-semibold">{activeTasks.length}</span>
+            {activeTasks.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                Sin tareas activas por ahora.
+              </p>
+            ) : (
+              <div className="rounded-xl border border-border/60 overflow-hidden stagger-children">
+                {activeTasks.slice(0, 5).map((task, i) => (
+                  <div
+                    key={task.id}
+                    className={cn(
+                      "flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors",
+                      i !== 0 && "border-t border-border/40"
+                    )}
+                  >
+                    <span className={cn("h-2 w-2 rounded-full shrink-0 animate-pulse-soft", STATUS_DOT[task.status] ?? "bg-slate-400")} />
+                    <span className="text-xs font-mono text-muted-foreground shrink-0">
+                      #{task.correlativeId}
+                    </span>
+                    <span className="flex-1 text-sm font-medium text-foreground truncate">
+                      {task.name}
+                    </span>
+                    <span className={cn("text-[11px] rounded-full px-2 py-0.5 font-medium shrink-0", STATUS_STYLE[task.status])}>
+                      {STATUS_LABEL[task.status] ?? task.status}
+                    </span>
+                  </div>
+                ))}
               </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Finalizadas</span>
-                <span className="font-semibold">{myTasks.filter((t) => t.status === "finalizado").length}</span>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+            )}
+          </section>
 
-        <div className="lg:col-span-2 space-y-4">
-          {activeTasks.length > 0 && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4" />
-                  Mis tareas activas
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {activeTasks.slice(0, 6).map((task) => (
-                    <div key={task.id} className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/30 px-3 py-2.5">
-                      <span className="text-xs font-mono text-muted-foreground">#{task.correlativeId}</span>
-                      <span className="flex-1 text-sm font-medium truncate">{task.name}</span>
-                      <span className={cn("text-xs rounded-full px-2 py-0.5 font-medium", STATUS_STYLE[task.status])}>
-                        {STATUS_LABEL[task.status] ?? task.status}
+          {/* Novedades */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Megaphone className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Novedades
+              </span>
+            </div>
+
+            {events.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No hay novedades por ahora.
+              </p>
+            ) : (
+              <div className="space-y-2 stagger-children">
+                {events.map((ev) => (
+                  <div
+                    key={ev.id}
+                    className={cn(
+                      "rounded-xl border px-4 py-3.5 space-y-1.5 transition-colors",
+                      ev.pinned
+                        ? "border-primary/25 bg-primary/5"
+                        : "border-border/60 bg-muted/20 hover:bg-muted/40"
+                    )}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      {ev.pinned && <Pin className="h-3 w-3 text-primary shrink-0" />}
+                      <span className="font-semibold text-sm text-foreground truncate">{ev.title}</span>
+                      <Badge variant="outline" className="text-[10px] shrink-0 ml-auto border-border/50">
+                        {ev.type === "evento" ? "Evento" : "Comunicado"}
+                      </Badge>
+                    </div>
+                    {ev.content && (
+                      <p className="text-sm text-muted-foreground leading-relaxed">{ev.content}</p>
+                    )}
+                    <div className="flex items-center gap-3 pt-0.5">
+                      {ev.eventDate && (
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <CalendarDays className="h-3 w-3" />
+                          {new Date(ev.eventDate).toLocaleDateString("es-CL", { day: "numeric", month: "long" })}
+                        </span>
+                      )}
+                      <span className="text-xs text-muted-foreground ml-auto">
+                        {new Date(ev.createdAt).toLocaleDateString("es-CL", { day: "numeric", month: "short" })}
                       </span>
                     </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
 
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <Megaphone className="h-4 w-4" />
-                Novedades
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {events.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-6">No hay novedades por ahora.</p>
-              ) : (
-                <div className="space-y-3">
-                  {events.map((ev) => (
-                    <div key={ev.id} className={cn("rounded-xl border p-4 space-y-1.5", ev.pinned ? "border-primary/30 bg-primary/5" : "border-border bg-muted/30")}>
-                      <div className="flex items-center gap-2 min-w-0">
-                        {ev.pinned && <Pin className="h-3.5 w-3.5 text-primary shrink-0" />}
-                        <span className="font-semibold text-sm truncate">{ev.title}</span>
-                        <Badge variant="outline" className="text-[10px] shrink-0">
-                          {ev.type === "evento" ? "Evento" : "Comunicado"}
-                        </Badge>
-                      </div>
-                      {ev.content && <p className="text-sm text-muted-foreground">{ev.content}</p>}
-                      <div className="flex items-center gap-3 pt-1">
-                        {ev.eventDate && (
-                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <CalendarDays className="h-3 w-3" />
-                            {new Date(ev.eventDate).toLocaleDateString("es-CL", { day: "numeric", month: "long" })}
-                          </span>
-                        )}
-                        <span className="text-xs text-muted-foreground ml-auto">
-                          {new Date(ev.createdAt).toLocaleDateString("es-CL", { day: "numeric", month: "short" })}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
         </div>
       </div>
     </div>

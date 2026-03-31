@@ -149,6 +149,16 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
+
+    // Progress-only update (quick edit from card)
+    if (typeof body.progress === "number" && Object.keys(body).length === 1) {
+      const progress = Math.min(Math.max(Math.round(body.progress), 0), 100)
+      const [updated] = await db.update(projects).set({ progress }).where(eq(projects.id, id)).returning()
+      if (!updated) return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 })
+      const workers = await db.select().from(projectWorkers).where(eq(projectWorkers.projectId, id))
+      return NextResponse.json(toProjectResponse(updated, workers.map((w) => w.userId)))
+    }
+
     const parsed = projectSchema.safeParse(body)
 
     if (!parsed.success) {

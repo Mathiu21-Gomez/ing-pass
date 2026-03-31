@@ -1,9 +1,34 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/db"
-import { tasks, taskAssignments, activities, documents, comments, taskTags, tags } from "@/db/schema"
+import { tasks, taskAssignments, activities, documents, comments, taskTags, tags, notifications } from "@/db/schema"
 import { and, eq } from "drizzle-orm"
 import { getAuthUser } from "@/lib/api-auth"
 import { getTaskAccessContext } from "@/lib/task-access"
+
+async function createTaskAssignedNotifications(input: {
+  taskId: string
+  taskName: string
+  newUserIds: string[]
+  assignedById: string
+  assignedByName: string
+}) {
+  const usersToNotify = input.newUserIds.filter((id) => id !== input.assignedById)
+  if (usersToNotify.length === 0) return
+  try {
+    await db.insert(notifications).values(
+      usersToNotify.map((userId) => ({
+        userId,
+        type: "task_assigned" as const,
+        entityType: "task" as const,
+        entityId: input.taskId,
+        fromUserId: input.assignedById,
+        message: `${input.assignedByName} te asignó la tarea "${input.taskName}"`,
+      }))
+    )
+  } catch (err) {
+    console.error("Error creating task_assigned notifications:", err)
+  }
+}
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string")
@@ -117,6 +142,16 @@ export async function PATCH(
       )
     }
 
+    // Capture current assignments before mutation for diff
+    let previousAssignedIds: string[] = []
+    if (assignedTo !== undefined) {
+      const prevRows = await db
+        .select({ userId: taskAssignments.userId })
+        .from(taskAssignments)
+        .where(eq(taskAssignments.taskId, id))
+      previousAssignedIds = prevRows.map((r) => r.userId)
+    }
+
     let currentTask
 
     if (assignedTo !== undefined) {
@@ -215,6 +250,21 @@ export async function PATCH(
         { error: "Tarea no encontrada" },
         { status: 404 }
       )
+    }
+
+    // Notify newly added assignees (diff against previous state)
+    if (assignedTo !== undefined && assignedTo.length > 0) {
+      const prevSet = new Set(previousAssignedIds)
+      const newlyAssigned = assignedTo.filter((uid) => !prevSet.has(uid))
+      if (newlyAssigned.length > 0) {
+        void createTaskAssignedNotifications({
+          taskId: id,
+          taskName: updatedTask.name ?? "",
+          newUserIds: newlyAssigned,
+          assignedById: authUser.id,
+          assignedByName: authUser.name,
+        })
+      }
     }
 
     return NextResponse.json(updatedTask)

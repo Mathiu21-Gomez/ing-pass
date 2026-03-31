@@ -6,6 +6,8 @@ import {
   projectUrls,
   tasks,
   taskAssignments,
+  taskTags,
+  tags,
   activities,
   documents,
   clients,
@@ -63,14 +65,18 @@ export async function GET(request: NextRequest) {
       ])
 
       const taskIds = allTasks.map((t) => t.id)
-      const [allAssignments, allActivities, allTaskDocs] =
+      const [allAssignments, allActivities, allTaskDocs, allTaskTags] =
         taskIds.length > 0
           ? await Promise.all([
               db.select().from(taskAssignments).where(inArray(taskAssignments.taskId, taskIds)),
               db.select().from(activities).where(inArray(activities.taskId, taskIds)),
               db.select().from(documents).where(inArray(documents.taskId, taskIds)),
+              db.select({ taskId: taskTags.taskId, id: tags.id, name: tags.name, color: tags.color, projectId: tags.projectId, createdBy: tags.createdBy, createdAt: tags.createdAt })
+                .from(taskTags)
+                .innerJoin(tags, eq(taskTags.tagId, tags.id))
+                .where(inArray(taskTags.taskId, taskIds)),
             ])
-          : [[], [], []]
+          : [[], [], [], []]
 
       const workersByProject = new Map<string, string[]>()
       for (const w of allWorkers) {
@@ -121,6 +127,13 @@ export async function GET(request: NextRequest) {
         docsByTask.set(d.taskId!, list)
       }
 
+      const tagsByTask = new Map<string, { id: string; name: string; color: string; projectId: string | null; createdBy: string; createdAt: Date | string }[]>()
+      for (const t of allTaskTags) {
+        const list = tagsByTask.get(t.taskId) ?? []
+        list.push({ id: t.id, name: t.name, color: t.color, projectId: t.projectId, createdBy: t.createdBy, createdAt: t.createdAt })
+        tagsByTask.set(t.taskId, list)
+      }
+
       const enriched = allProjects.map((project) => {
         const projectTaskList = tasksByProject.get(project.id) ?? []
         return {
@@ -132,6 +145,7 @@ export async function GET(request: NextRequest) {
             assignedTo: assignmentsByTask.get(task.id) ?? [],
             activities: activitiesByTask.get(task.id) ?? [],
             documents: docsByTask.get(task.id) ?? [],
+            tags: tagsByTask.get(task.id) ?? [],
           })),
           documents: docsByProject.get(project.id) ?? [],
         }
@@ -167,14 +181,18 @@ export async function GET(request: NextRequest) {
 
     // Batch fetch: todos los datos relacionados a tareas en paralelo
     const taskIds = allTasks.map((t) => t.id)
-    const [allAssignments, allActivities, allTaskDocs] =
+    const [allAssignments, allActivities, allTaskDocs, allTaskTags] =
       taskIds.length > 0
         ? await Promise.all([
             db.select().from(taskAssignments).where(inArray(taskAssignments.taskId, taskIds)),
             db.select().from(activities).where(inArray(activities.taskId, taskIds)),
             db.select().from(documents).where(inArray(documents.taskId, taskIds)),
+            db.select({ taskId: taskTags.taskId, id: tags.id, name: tags.name, color: tags.color, projectId: tags.projectId, createdBy: tags.createdBy, createdAt: tags.createdAt })
+              .from(taskTags)
+              .innerJoin(tags, eq(taskTags.tagId, tags.id))
+              .where(inArray(taskTags.taskId, taskIds)),
           ])
-        : [[], [], []]
+        : [[], [], [], []]
 
     // Lookup maps O(1)
     const workersByProject = new Map<string, string[]>()
@@ -226,6 +244,13 @@ export async function GET(request: NextRequest) {
       docsByTask.set(d.taskId!, list)
     }
 
+    const tagsByTask = new Map<string, { id: string; name: string; color: string; projectId: string | null; createdBy: string; createdAt: Date | string }[]>()
+    for (const t of allTaskTags) {
+      const list = tagsByTask.get(t.taskId) ?? []
+      list.push({ id: t.id, name: t.name, color: t.color, projectId: t.projectId, createdBy: t.createdBy, createdAt: t.createdAt })
+      tagsByTask.set(t.taskId, list)
+    }
+
     // Armar respuesta en memoria
     const enriched = allProjects.map((project) => {
       const projectTaskList = tasksByProject.get(project.id) ?? []
@@ -238,6 +263,7 @@ export async function GET(request: NextRequest) {
           assignedTo: assignmentsByTask.get(task.id) ?? [],
           activities: activitiesByTask.get(task.id) ?? [],
           documents: docsByTask.get(task.id) ?? [],
+          tags: tagsByTask.get(task.id) ?? [],
         })),
         documents: docsByProject.get(project.id) ?? [],
       }

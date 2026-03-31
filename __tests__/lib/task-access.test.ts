@@ -9,6 +9,8 @@ vi.mock("@/db", () => ({
         innerJoin: vi.fn(() => ({
           where: vi.fn(() => Promise.resolve(mockTaskRows)),
         })),
+        // Direct .where() used in the trabajador assignment check
+        where: vi.fn(() => Promise.resolve([])),
       })),
     })),
   },

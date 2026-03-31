@@ -97,6 +97,22 @@ export async function getProjectMessageAccessContext(
     }
   }
 
+  if (user.role === "trabajador") {
+    const membership = await db
+      .select({ projectId: projectWorkers.projectId })
+      .from(projectWorkers)
+      .where(and(eq(projectWorkers.projectId, projectId), eq(projectWorkers.userId, user.id)))
+
+    if (membership.length > 0) {
+      return { context: projectContext, error: null }
+    }
+
+    return {
+      context: null,
+      error: notFound("Proyecto no encontrado"),
+    }
+  }
+
   return {
     context: null,
     error: forbidden(),

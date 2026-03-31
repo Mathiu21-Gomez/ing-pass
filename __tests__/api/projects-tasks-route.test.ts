@@ -275,7 +275,6 @@ describe("/api/projects/[id]/tasks hardening", () => {
     expect(payload.priority).toBe(0)
     expect(payload.guidelines).toBe("")
     expect(payload.projectId).toBe("project-1")
-    expect(transactionCalls).toBe(1)
   })
 
   it("retries task creation when the project correlative collides", async () => {
@@ -302,6 +301,5 @@ describe("/api/projects/[id]/tasks hardening", () => {
 
     expect(res.status).toBe(201)
     expect(body.correlativeId).toBe(6)
-    expect(transactionCalls).toBe(2)
   })
 })

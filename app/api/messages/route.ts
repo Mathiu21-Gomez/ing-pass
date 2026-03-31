@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/db"
-import { messages, user, projects, tasks } from "@/db/schema"
+import { messages, user, projects, tasks, notifications } from "@/db/schema"
 import { getAuthUser } from "@/lib/api-auth"
 import {
   getProjectMessageAccessContext,
@@ -246,6 +246,41 @@ export async function POST(request: NextRequest) {
         attachments: attachments ?? [],
       })
       .returning()
+
+    // ── @mention notifications ──
+    if (taskId && created.content) {
+      try {
+        const mentionMatches = [...created.content.matchAll(/@([\w][\w\s]*)/g)]
+        if (mentionMatches.length > 0) {
+          const mentionedNames = [...new Set(mentionMatches.map((m) => m[1].trim()))]
+          const mentionedUsers = await db
+            .select({ id: user.id, name: user.name })
+            .from(user)
+            .where(sql`lower(${user.name}) = ANY(ARRAY[${sql.join(
+              mentionedNames.map((n) => sql`lower(${n})`),
+              sql`, `
+            )}])`)
+
+          if (mentionedUsers.length > 0) {
+            await db.insert(notifications).values(
+              mentionedUsers
+                .filter((u) => u.id !== authUser.id)
+                .map((mentionedUser) => ({
+                  userId: mentionedUser.id,
+                  type: "mention" as const,
+                  entityType: "task" as const,
+                  entityId: taskId,
+                  fromUserId: authUser.id,
+                  message: `${authUser.name} te mencionó en una tarea`,
+                }))
+            )
+          }
+        }
+      } catch (mentionErr) {
+        console.error("Error creating mention notifications:", mentionErr)
+        // non-blocking — message was already saved
+      }
+    }
 
     const withUser = {
       ...created,

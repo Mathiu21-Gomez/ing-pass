@@ -68,9 +68,10 @@ interface TaskChange {
 
 interface WorkdayPanelProps {
   showPreStart?: boolean  // if true, show the pre-start notification card (only for workers)
+  timerOnly?: boolean     // if true, render only the timer card (home page compact mode)
 }
 
-export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
+export function WorkdayPanel({ showPreStart, timerOnly }: WorkdayPanelProps) {
   const { user } = useAuth()
   const {
     status,
@@ -111,6 +112,7 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>("")
   const [selectedTaskId, setSelectedTaskId] = useState<string>("")
+  const [taskMentionableUsers, setTaskMentionableUsers] = useState<{ id: string; name: string }[]>([])
   const [notes, setNotes] = useState("")
   const [expandedProject, setExpandedProject] = useState(false)
   const [taskChanges, setTaskChanges] = useState<TaskChange[]>([])
@@ -141,6 +143,10 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
   const [newActivityName, setNewActivityName] = useState("")
   const [newActivityDescription, setNewActivityDescription] = useState("")
 
+  // Inline start form state (timerOnly mode)
+  const [showStartDialog, setShowStartDialog] = useState(false)
+  const [startConfirmed, setStartConfirmed] = useState(false)
+
   // End day dialog
   const [showEndDialog, setShowEndDialog] = useState(false)
   const [endNotes, setEndNotes] = useState("")
@@ -151,6 +157,18 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
   const selectedTask = selectedProject?.tasks.find((t) => t.id === selectedTaskId)
   const canCreateTask = canCreateWorkdayTask(user?.role)
   const createTaskHint = getWorkdayTaskCreationHint(user?.role)
+
+  useEffect(() => {
+    if (!selectedTask?.id) {
+      setTaskMentionableUsers([])
+      return
+    }
+
+    fetch(`/api/tasks/${selectedTask.id}/mentionable`)
+      .then((response) => (response.ok ? response.json() : []))
+      .then((data) => setTaskMentionableUsers(Array.isArray(data) ? data : []))
+      .catch(() => setTaskMentionableUsers([]))
+  }, [selectedTask?.id])
 
   // Available tasks for the selected project (open tasks only)
   const availableTasks = selectedProject?.tasks.filter((t) => t.status !== "finalizado") ?? []
@@ -167,7 +185,7 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
     setSendingPreStart(true)
     try {
       const sid = crypto.randomUUID()
-      await fetch("/api/messages", {
+      const res = await fetch("/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -179,6 +197,10 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
           attachments: preStartScreenshot,
         }),
       })
+      if (!res.ok) {
+        toast.error("Error al enviar la notificación")
+        return
+      }
       setPreStartSessionId(sid)
       setPreStartSent(true)
       toast.success("Notificación enviada a admin y coordinador")
@@ -360,6 +382,197 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
       setScheduleEndTime(todaySchedule.endTime)
     }
   }, [user?.id, allUsers, setScheduleEndTime])
+
+  // ─── Timer-only mode (home page) ─────────────────────
+  if (timerOnly) {
+    return (
+      <>
+        <Card className="overflow-hidden">
+          {/* Status bar */}
+          <div className={cn(
+            "h-1 transition-colors duration-500",
+            status === "trabajando" ? "bg-emerald-500 animate-pulse" :
+              status === "colacion" ? "bg-amber-500" :
+                status === "pausado" ? "bg-orange-500" :
+                  status === "reunion" ? "bg-indigo-500" : "bg-border"
+          )} />
+
+          <CardContent className="pt-6 pb-5 flex flex-col items-center gap-4">
+            {/* Timer display */}
+            <p className={cn(
+              "font-mono text-5xl font-bold tabular-nums tracking-tight",
+              status === "trabajando" ? "text-emerald-500" :
+                status === "colacion" ? "text-amber-500" :
+                  status === "pausado" ? "text-orange-500" :
+                    status === "reunion" ? "text-indigo-500" : "text-muted-foreground"
+            )}>
+              {timerDisplay}
+            </p>
+
+            {isExtraTime && status !== "finalizado" && status !== "inactivo" && (
+              <Badge variant="outline" className="text-amber-600 border-amber-500 animate-pulse">
+                ⏱ Tiempo extra
+              </Badge>
+            )}
+
+            {/* Controls */}
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {status === "trabajando" && (
+                <>
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={startLunch}>
+                    <UtensilsCrossed className="h-4 w-4" />
+                    Colación
+                  </Button>
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={pauseWork}>
+                    <Coffee className="h-4 w-4" />
+                    Pausa
+                  </Button>
+                  <Button variant="destructive" size="sm" className="gap-1.5" onClick={() => setShowEndDialog(true)}>
+                    <Square className="h-4 w-4" />
+                    Finalizar Día
+                  </Button>
+                </>
+              )}
+              {status === "pausado" && (
+                <>
+                  <Button size="sm" className="gap-1.5" onClick={resumeWork}>
+                    <Play className="h-4 w-4" />
+                    Reanudar
+                  </Button>
+                  <Button variant="destructive" size="sm" className="gap-1.5" onClick={() => setShowEndDialog(true)}>
+                    <Square className="h-4 w-4" />
+                    Finalizar Día
+                  </Button>
+                </>
+              )}
+              {status === "colacion" && (
+                <Button size="sm" className="gap-1.5" onClick={endLunch}>
+                  <Play className="h-4 w-4" />
+                  Volver al trabajo
+                </Button>
+              )}
+              {status === "reunion" && (
+                <Button size="sm" className="gap-1.5 bg-indigo-600 hover:bg-indigo-700" onClick={endMeeting}>
+                  <Play className="h-4 w-4" />
+                  Finalizar Reunión
+                </Button>
+              )}
+            </div>
+
+          </CardContent>
+
+          {/* ─── Sección proyecto + tarea ─── */}
+          <div className="border-t border-border/60 px-5 py-4 flex flex-col gap-3 bg-muted/30">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+              <FolderKanban className="h-3.5 w-3.5" />
+              Proyecto y tarea
+            </p>
+
+            {/* Modo activo: muestra los valores como texto */}
+            {isWorking ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs text-muted-foreground">Proyecto</span>
+                  <span className="text-sm font-medium text-foreground truncate">
+                    {selectedProject?.name ?? "—"}
+                  </span>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs text-muted-foreground">Tarea</span>
+                  <span className="text-sm font-medium text-foreground truncate">
+                    {selectedTask?.name ?? "—"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 pt-1 text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                  <span className="text-xs font-semibold">Confirmado</span>
+                </div>
+              </div>
+            ) : (
+              /* Modo selección: dropdowns + botón iniciar */
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs text-muted-foreground">Proyecto</Label>
+                  <Select
+                    value={selectedProjectId}
+                    onValueChange={(val) => { setSelectedProjectId(val); setSelectedTaskId("") }}
+                  >
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Seleccionar proyecto" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredProjects.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs text-muted-foreground">Tarea</Label>
+                  <Select
+                    value={selectedTaskId}
+                    onValueChange={setSelectedTaskId}
+                    disabled={!selectedProjectId}
+                  >
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Seleccionar tarea" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableTasks.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <Button
+                  size="sm"
+                  disabled={!selectedProjectId || !selectedTaskId}
+                  onClick={handleStart}
+                  className="gap-1.5 w-full mt-1"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  Iniciar Jornada
+                </Button>
+              </>
+            )}
+          </div>
+        </Card>
+
+        {/* End day dialog */}
+        <Dialog open={showEndDialog} onOpenChange={setShowEndDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Square className="h-4 w-4 text-destructive" />
+                Finalizar Jornada
+              </DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col gap-4 py-2">
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Notas de cierre</Label>
+                <Textarea value={endNotes} onChange={(e) => setEndNotes(e.target.value)} placeholder="Resumen de lo que hiciste hoy..." rows={2} className="text-sm resize-none" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Avance de la tarea (%)</Label>
+                <input type="range" min={0} max={100} step={5} value={endProgress} onChange={(e) => setEndProgress(e.target.value)} className="w-full accent-primary" />
+                <p className="text-xs text-center font-semibold text-primary">{endProgress}%</p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Justificación</Label>
+                <Textarea value={endJustification} onChange={(e) => setEndJustification(e.target.value)} placeholder="Describe qué queda pendiente..." rows={2} className="text-sm resize-none" />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowEndDialog(false)}>Cancelar</Button>
+              <Button variant="destructive" onClick={handleEndDay}>Finalizar Jornada</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </>
+    )
+  }
 
   return (
     <>
@@ -795,6 +1008,8 @@ export function WorkdayPanel({ showPreStart }: WorkdayPanelProps) {
               {selectedTask && (
                 <ChatPanel
                   taskId={selectedTask.id}
+                  useTaskChat={true}
+                  mentionableUsers={taskMentionableUsers}
                   title={`Comunicación — ${selectedTask.name}`}
                   placeholder="Escribí un mensaje sobre esta tarea..."
                 />

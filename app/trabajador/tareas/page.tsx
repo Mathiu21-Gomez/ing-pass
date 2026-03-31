@@ -1,27 +1,17 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef, Suspense } from "react"
+import { useSearchParams } from "next/navigation"
 import { useAuth } from "@/lib/contexts/auth-context"
-import type { Task, TaskStatus, Project, User, Tag, Comment, Activity } from "@/lib/types"
+import type { Task, TaskStatus, Project, User, Tag, Activity } from "@/lib/types"
+import { ChatPanel } from "@/components/chat-panel"
+import { SharedLinksPanel } from "@/components/shared-links-panel"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Badge } from "@/components/ui/badge"
 import {
   Tabs,
   TabsContent,
@@ -29,61 +19,88 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs"
 import {
-  Plus,
   Search,
   ChevronDown,
   ChevronRight,
-  MessageSquare,
-  Send,
   CheckCircle2,
   Circle,
   Bell,
-  Tag as TagIcon,
   X,
-  Pencil,
-  ArrowUpDown,
   AlertCircle,
   Clock,
   CheckCheck,
   Loader2,
+  MessageSquare,
+  FolderKanban,
+  CalendarDays,
+  Flag,
+  ListTodo,
+  Users,
+  BookOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { format } from "date-fns"
+import { es } from "date-fns/locale"
 
-// ─── Status Config ──────────────────────────────────────────────
-const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; icon: React.ReactNode; order: number }> = {
-  en_curso:            { label: "En Curso",             color: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",        icon: <Loader2 className="h-3.5 w-3.5" />,        order: 1 },
-  pendiente:           { label: "Pendiente",            color: "bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/20",     icon: <Circle className="h-3.5 w-3.5" />,         order: 2 },
-  retrasado:           { label: "Retrasado",            color: "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/20",             icon: <AlertCircle className="h-3.5 w-3.5" />,    order: 3 },
-  bloqueado:           { label: "Bloqueado",            color: "bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/20", icon: <AlertCircle className="h-3.5 w-3.5" />,    order: 4 },
-  esperando_info:      { label: "Esperando info",       color: "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400 border-yellow-500/20", icon: <Clock className="h-3.5 w-3.5" />,          order: 5 },
-  listo_para_revision: { label: "Para revisión",        color: "bg-violet-500/15 text-violet-600 dark:text-violet-400 border-violet-500/20", icon: <CheckCircle2 className="h-3.5 w-3.5" />,   order: 6 },
-  finalizado:          { label: "Finalizado",           color: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20", icon: <CheckCheck className="h-3.5 w-3.5" />, order: 7 },
+// ── Status config ──────────────────────────────────────────────────────────
+
+const STATUS_CONFIG: Record<TaskStatus, {
+  label: string
+  color: string
+  bg: string
+  border: string
+  dot: string
+  icon: React.ReactNode
+  order: number
+}> = {
+  en_curso:            { label: "En Curso",        color: "text-blue-600 dark:text-blue-400",    bg: "bg-blue-500/10",    border: "border-blue-500/30",   dot: "bg-blue-500",    icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />, order: 1 },
+  pendiente:           { label: "Pendiente",        color: "text-slate-600 dark:text-slate-400",  bg: "bg-slate-500/10",   border: "border-slate-400/30",  dot: "bg-slate-400",   icon: <Circle className="h-3.5 w-3.5" />,               order: 2 },
+  retrasado:           { label: "Retrasado",        color: "text-red-600 dark:text-red-400",      bg: "bg-red-500/10",     border: "border-red-500/30",    dot: "bg-red-500",     icon: <AlertCircle className="h-3.5 w-3.5" />,          order: 3 },
+  bloqueado:           { label: "Bloqueado",        color: "text-orange-600 dark:text-orange-400",bg: "bg-orange-500/10",  border: "border-orange-500/30", dot: "bg-orange-500",  icon: <AlertCircle className="h-3.5 w-3.5" />,          order: 4 },
+  esperando_info:      { label: "Esperando info",   color: "text-yellow-600 dark:text-yellow-400",bg: "bg-yellow-500/10",  border: "border-yellow-500/30", dot: "bg-yellow-500",  icon: <Clock className="h-3.5 w-3.5" />,                order: 5 },
+  listo_para_revision: { label: "Para revisión",   color: "text-violet-600 dark:text-violet-400",bg: "bg-violet-500/10",  border: "border-violet-500/30", dot: "bg-violet-500",  icon: <CheckCircle2 className="h-3.5 w-3.5" />,         order: 6 },
+  finalizado:          { label: "Finalizado",       color: "text-emerald-600 dark:text-emerald-400",bg:"bg-emerald-500/10",border: "border-emerald-500/30",dot: "bg-emerald-500", icon: <CheckCheck className="h-3.5 w-3.5" />,           order: 7 },
 }
 
-const STATUS_ORDER = (Object.keys(STATUS_CONFIG) as TaskStatus[]).sort(
-  (a, b) => STATUS_CONFIG[a].order - STATUS_CONFIG[b].order
-)
+const AVATAR_COLORS = ["bg-blue-500","bg-violet-500","bg-rose-500","bg-amber-500","bg-emerald-500","bg-cyan-500"]
+function avatarColor(name: string) {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xfffff
+  return AVATAR_COLORS[h % AVATAR_COLORS.length]
+}
+function getInitials(name: string) {
+  return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase()
+}
 
-// ─── Tag Badge ──────────────────────────────────────────────────
-function TagBadge({ tag, onRemove }: { tag: Tag; onRemove?: () => void }) {
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function PriorityDots({ priority }: { priority: number }) {
+  const level = priority >= 75 ? 3 : priority >= 40 ? 2 : priority > 0 ? 1 : 0
+  const color = level === 3 ? "bg-red-500" : level === 2 ? "bg-amber-500" : "bg-slate-300 dark:bg-slate-600"
+  return (
+    <div className="flex items-center gap-0.5">
+      {[1, 2, 3].map((i) => (
+        <span key={i} className={cn("h-1.5 w-1.5 rounded-full", i <= level ? color : "bg-slate-200 dark:bg-slate-700")} />
+      ))}
+    </div>
+  )
+}
+
+function TagPill({ tag }: { tag: Tag }) {
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
       style={{ backgroundColor: tag.color }}
     >
       {tag.name}
-      {onRemove && (
-        <button onClick={onRemove} className="hover:opacity-70">
-          <X className="h-2.5 w-2.5" />
-        </button>
-      )}
     </span>
   )
 }
 
-// ─── Alert Dialog ───────────────────────────────────────────────
-function AlertDialog({ taskId, onClose }: { taskId: string; onClose: () => void }) {
+// ── Alert form (inline) ────────────────────────────────────────────────────
+
+function AlarmForm({ taskId, onClose }: { taskId: string; onClose: () => void }) {
   const [alertDate, setAlertDate] = useState("")
   const [alertTime, setAlertTime] = useState("09:00")
   const [message, setMessage] = useState("")
@@ -94,11 +111,12 @@ function AlertDialog({ taskId, onClose }: { taskId: string; onClose: () => void 
     setSaving(true)
     try {
       const alertAt = new Date(`${alertDate}T${alertTime}:00`)
-      await fetch(`/api/tasks/${taskId}/alerts`, {
+      const res = await fetch(`/api/tasks/${taskId}/alerts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ alertAt: alertAt.toISOString(), message }),
       })
+      if (!res.ok) throw new Error()
       toast.success("Alarma configurada")
       onClose()
     } catch {
@@ -109,176 +127,136 @@ function AlertDialog({ taskId, onClose }: { taskId: string; onClose: () => void 
   }
 
   return (
-    <div className="space-y-3 p-4 border rounded-lg bg-muted/30">
-      <p className="text-sm font-medium flex items-center gap-2">
-        <Bell className="h-4 w-4 text-primary" /> Configurar alarma
+    <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-3">
+      <p className="text-sm font-semibold flex items-center gap-2 text-foreground">
+        <Bell className="h-4 w-4 text-amber-500" />
+        Configurar alarma
       </p>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
-          <Label className="text-xs">Fecha</Label>
+          <Label className="text-xs text-muted-foreground">Fecha</Label>
           <Input type="date" value={alertDate} onChange={(e) => setAlertDate(e.target.value)} className="h-8 text-xs" />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Hora</Label>
+          <Label className="text-xs text-muted-foreground">Hora</Label>
           <Input type="time" value={alertTime} onChange={(e) => setAlertTime(e.target.value)} className="h-8 text-xs" />
         </div>
       </div>
       <div className="space-y-1">
-        <Label className="text-xs">Mensaje (opcional)</Label>
+        <Label className="text-xs text-muted-foreground">Mensaje (opcional)</Label>
         <Input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Recordatorio..." className="h-8 text-xs" />
       </div>
       <div className="flex gap-2 justify-end">
-        <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
+        <Button variant="ghost" size="sm" onClick={onClose}>Cancelar</Button>
         <Button size="sm" onClick={handleSave} disabled={saving}>
-          {saving ? "Guardando..." : "Guardar alarma"}
+          {saving && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+          Guardar
         </Button>
       </div>
     </div>
   )
 }
 
-// ─── Task Detail Panel ──────────────────────────────────────────
+// ── Task Detail Panel ──────────────────────────────────────────────────────
+
+type ExtendedTask = Task & { _projectName: string; _projectId: string }
+type WorkerTaskTab = "detalles" | "progreso" | "chat"
+
 function TaskDetailPanel({
   task,
   allUsers,
-  availableTags,
   isOpen,
-  onUpdate,
-  onTagsUpdate,
+  defaultTab = "detalles",
+  onStatusChange,
 }: {
-  task: Task & { _projectName: string; _projectId: string }
+  task: ExtendedTask
   allUsers: User[]
-  availableTags: Tag[]
   isOpen: boolean
-  onUpdate: (taskId: string, updates: Partial<Task>) => void
-  onTagsUpdate: (taskId: string, tags: Tag[]) => void
+   defaultTab?: WorkerTaskTab
+  onStatusChange: (taskId: string, status: TaskStatus) => void
 }) {
-  const { user } = useAuth()
-  const [comments, setComments] = useState<Comment[]>([])
-  const [commentText, setCommentText] = useState("")
-  const [commentsLoading, setCommentsLoading] = useState(true)
-  const [sortDesc, setSortDesc] = useState(true)
-  const [showAlertForm, setShowAlertForm] = useState(false)
-  const [showTagSelector, setShowTagSelector] = useState(false)
-  const [editingDescription, setEditingDescription] = useState(false)
-  const [descValue, setDescValue] = useState(task.description)
-  const [taskTags, setTaskTags] = useState<Tag[]>(task.tags ?? [])
-  const [activities, setActivities] = useState<Activity[]>(task.activities)
-  const [newCheckItem, setNewCheckItem] = useState("")
-  const [addingCheckItem, setAddingCheckItem] = useState(false)
+  const [activities, setActivities] = useState<Activity[]>([])
+  const [activitiesLoading, setActivitiesLoading] = useState(false)
+  const [newActivityName, setNewActivityName] = useState("")
+  const [addingActivity, setAddingActivity] = useState(false)
+  const [showAlarm, setShowAlarm] = useState(false)
+  const [activeTab, setActiveTab] = useState(defaultTab)
+  const [mentionableUsers, setMentionableUsers] = useState<{ id: string; name: string }[]>([])
+
+  const assignedUsers = allUsers.filter((u) => task.assignedTo?.includes(u.id))
 
   useEffect(() => {
     if (!isOpen) return
-    const load = async () => {
-      setCommentsLoading(true)
-      try {
-        const res = await fetch(`/api/tasks/${task.id}/comments`)
-        if (res.ok) setComments(await res.json())
-      } finally {
-        setCommentsLoading(false)
-      }
-    }
-    load()
+    fetch(`/api/tasks/${task.id}/mentionable`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setMentionableUsers(Array.isArray(data) ? data : []))
+      .catch(() => {})
   }, [isOpen, task.id])
 
-  const sortedComments = [...comments].sort((a, b) =>
-    sortDesc ? b.createdAt.localeCompare(a.createdAt) : a.createdAt.localeCompare(b.createdAt)
-  )
-
-  async function handleStatusChange(newStatus: TaskStatus) {
-    try {
-      await fetch(`/api/tasks/${task.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
-      })
-      onUpdate(task.id, { status: newStatus })
-      toast.success("Estado actualizado")
-    } catch {
-      toast.error("Error al actualizar estado")
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(defaultTab)
     }
-  }
-
-  async function handleSaveDescription() {
-    try {
-      await fetch(`/api/tasks/${task.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: descValue }),
-      })
-      onUpdate(task.id, { description: descValue })
-      setEditingDescription(false)
-      toast.success("Descripción actualizada")
-    } catch {
-      toast.error("Error al actualizar")
-    }
-  }
-
-  async function handleAddComment() {
-    if (!commentText.trim() || !user) return
-    try {
-      const res = await fetch(`/api/tasks/${task.id}/comments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: commentText.trim(), authorId: user.id, parentType: "task" }),
-      })
-      const newComment = await res.json()
-      setComments((prev) => [...prev, newComment])
-      setCommentText("")
-    } catch {
-      toast.error("Error al agregar comentario")
-    }
-  }
-
-  async function handleTagToggle(tag: Tag) {
-    const has = taskTags.some((t) => t.id === tag.id)
-    const newTags = has ? taskTags.filter((t) => t.id !== tag.id) : [...taskTags, tag]
-    setTaskTags(newTags)
-    await fetch(`/api/tasks/${task.id}/tags`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tagIds: newTags.map((t) => t.id) }),
-    })
-    onTagsUpdate(task.id, newTags)
-  }
-
-  async function handleToggleActivity(activityId: string, completed: boolean) {
-    try {
-      const res = await fetch(`/api/tasks/${task.id}/activities`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ activityId, completed }),
-      })
-      const updated = await res.json()
-      setActivities((prev) => prev.map((a) => (a.id === activityId ? updated : a)))
-    } catch {
-      toast.error("Error al actualizar checklist")
-    }
-  }
-
-  async function handleAddCheckItem() {
-    if (!newCheckItem.trim() || !user || addingCheckItem) return
-    setAddingCheckItem(true)
-    try {
-      const res = await fetch(`/api/tasks/${task.id}/activities`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newCheckItem.trim(), description: "" }),
-      })
-      if (!res.ok) { toast.error("Error al agregar paso"); return }
-      const newActivity = await res.json()
-      setActivities((prev) => [...prev, newActivity])
-      setNewCheckItem("")
-    } catch {
-      toast.error("Error al agregar paso")
-    } finally {
-      setAddingCheckItem(false)
-    }
-  }
+  }, [defaultTab, isOpen, task.id])
 
   const completedCount = activities.filter((a) => a.completed).length
   const progress = activities.length > 0 ? Math.round((completedCount / activities.length) * 100) : 0
-  const assignedUsers = allUsers.filter((u) => task.assignedTo.includes(u.id))
+
+  const fetchActivities = useCallback(async () => {
+    if (!isOpen) return
+    setActivitiesLoading(true)
+    try {
+      const res = await fetch(`/api/tasks/${task.id}/activities`)
+      if (!res.ok) throw new Error()
+      const data = await res.json()
+      setActivities(data)
+    } catch {
+      // silent
+    } finally {
+      setActivitiesLoading(false)
+    }
+  }, [task.id, isOpen])
+
+  useEffect(() => {
+    fetchActivities()
+  }, [fetchActivities])
+
+  async function handleToggleActivity(actId: string, completed: boolean) {
+    setActivities((prev) =>
+      prev.map((a) => (a.id === actId ? { ...a, completed } : a))
+    )
+    try {
+      await fetch(`/api/activities/${actId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ completed }),
+      })
+    } catch {
+      setActivities((prev) =>
+        prev.map((a) => (a.id === actId ? { ...a, completed: !completed } : a))
+      )
+    }
+  }
+
+  async function handleAddActivity() {
+    if (!newActivityName.trim()) return
+    setAddingActivity(true)
+    try {
+      const res = await fetch(`/api/tasks/${task.id}/activities`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newActivityName.trim() }),
+      })
+      if (!res.ok) throw new Error()
+      const created: Activity = await res.json()
+      setActivities((prev) => [...prev, created])
+      setNewActivityName("")
+    } catch {
+      toast.error("Error al agregar paso")
+    } finally {
+      setAddingActivity(false)
+    }
+  }
 
   return (
     <div
@@ -287,234 +265,177 @@ function TaskDetailPanel({
         isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
       )}
     >
-      <div className="overflow-hidden min-h-0">
-        <div className="border-t border-l-4 border-l-primary/30 bg-primary/[0.02]">
-
-          {/* Header del panel */}
-          <div className="px-5 py-2.5 bg-muted/30 border-b flex items-center gap-3 flex-wrap">
-            <span className="text-[10px] font-mono font-semibold text-muted-foreground">#{task.correlativeId}</span>
-            <span className="text-[10px] text-muted-foreground/50">·</span>
-            <span className="text-[10px] text-muted-foreground">{task._projectName}</span>
-            <div className="ml-auto flex items-center gap-3 flex-wrap">
-              <Select value={task.status} onValueChange={(v) => handleStatusChange(v as TaskStatus)}>
-                <SelectTrigger className={cn("w-auto h-7 text-xs border px-2.5 gap-1.5", STATUS_CONFIG[task.status].color)}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUS_ORDER.map((s) => (
-                    <SelectItem key={s} value={s} className="text-xs">
-                      <span className={cn("px-2 py-0.5 rounded-full text-[10px]", STATUS_CONFIG[s].color)}>
-                        {STATUS_CONFIG[s].label}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {activities.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <Progress value={progress} className="h-1.5 w-20" />
-                  <span className={cn("text-xs font-semibold tabular-nums", progress === 100 ? "text-emerald-500" : "text-primary")}>
-                    {progress}%
-                  </span>
-                </div>
-              )}
-              <div className="flex -space-x-1">
-                {assignedUsers.slice(0, 4).map((u) => (
-                  <div key={u.id} title={u.name} className="h-6 w-6 rounded-full bg-primary/10 border-2 border-background flex items-center justify-center text-[9px] font-bold text-primary">
-                    {u.name.charAt(0)}
-                  </div>
-                ))}
-              </div>
+      <div className="overflow-hidden">
+        <div className="rounded-2xl border border-border bg-card mx-1 mb-3 mt-1 shadow-sm">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)} className="w-full">
+            <div className="border-b border-border px-4 pt-3">
+              <TabsList className="h-9 gap-1 bg-transparent p-0">
+                <TabsTrigger
+                  value="detalles"
+                  className="rounded-lg px-3 py-1.5 text-xs font-medium data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none"
+                >
+                  <BookOpen className="h-3.5 w-3.5 mr-1.5" />
+                  Detalles
+                </TabsTrigger>
+                <TabsTrigger
+                  value="progreso"
+                  className="rounded-lg px-3 py-1.5 text-xs font-medium data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none"
+                >
+                  <ListTodo className="h-3.5 w-3.5 mr-1.5" />
+                  Progreso
+                  {activities.length > 0 && (
+                    <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                      {completedCount}/{activities.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="chat"
+                  className="rounded-lg px-3 py-1.5 text-xs font-medium data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none"
+                >
+                  <MessageSquare className="h-3.5 w-3.5 mr-1.5" />
+                  Chat
+                </TabsTrigger>
+              </TabsList>
             </div>
-          </div>
 
-          {/* Tabs */}
-          <Tabs defaultValue="detalles" className="flex flex-col">
-            <TabsList className="w-full rounded-none border-b h-10 bg-transparent px-5 justify-start gap-1 shrink-0">
-              <TabsTrigger value="detalles" className="text-xs h-8 px-3 data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none">
-                Detalles
-              </TabsTrigger>
-              <TabsTrigger value="checklist" className="text-xs h-8 px-3 data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none">
-                Checklist {activities.length > 0 && <span className="ml-1 text-[10px] text-muted-foreground">({completedCount}/{activities.length})</span>}
-              </TabsTrigger>
-              <TabsTrigger value="comentarios" className="text-xs h-8 px-3 data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none">
-                Comentarios {comments.length > 0 && <span className="ml-1 text-[10px] text-muted-foreground">({comments.length})</span>}
-              </TabsTrigger>
-            </TabsList>
-
-            {/* Detalles */}
-            <TabsContent value="detalles" className="mt-0 px-5 py-4 space-y-5">
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs text-muted-foreground">Descripción</Label>
-                  <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={() => setEditingDescription(!editingDescription)}>
-                    <Pencil className="h-3 w-3" />
-                  </Button>
+            {/* ── Detalles ── */}
+            <TabsContent value="detalles" className="p-4 space-y-4 m-0">
+              {/* Proyecto + alarma */}
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-1.5 rounded-lg bg-primary/8 border border-primary/20 px-2.5 py-1.5">
+                  <FolderKanban className="h-3.5 w-3.5 text-primary" />
+                  <span className="text-xs font-semibold text-primary">{task._projectName}</span>
                 </div>
-                {editingDescription ? (
-                  <div className="space-y-2">
-                    <Textarea value={descValue} onChange={(e) => setDescValue(e.target.value)} rows={4} className="text-sm" />
-                    <div className="flex gap-2 justify-end">
-                      <Button variant="outline" size="sm" onClick={() => setEditingDescription(false)}>Cancelar</Button>
-                      <Button size="sm" onClick={handleSaveDescription}>Guardar</Button>
-                    </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 gap-1.5 text-xs text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                  onClick={() => setShowAlarm((v) => !v)}
+                >
+                  <Bell className="h-3.5 w-3.5" />
+                  Alarma
+                </Button>
+              </div>
+
+              {showAlarm && (
+                <AlarmForm taskId={task.id} onClose={() => setShowAlarm(false)} />
+              )}
+
+              {/* Info del proyecto */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+                  <FolderKanban className="h-3.5 w-3.5" />
+                  {task._projectName}
+                </div>
+                {task.dueDate && (
+                  <div className="flex items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+                    <CalendarDays className="h-3.5 w-3.5" />
+                    {format(new Date(task.dueDate), "d MMM yyyy", { locale: es })}
                   </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
-                    {task.description || <span className="italic opacity-40">Sin descripción</span>}
-                  </p>
+                )}
+                {assignedUsers.length > 0 && (
+                  <div className="flex items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+                    <Users className="h-3.5 w-3.5" />
+                    {assignedUsers.map((u) => u.name.split(" ")[0]).join(", ")}
+                  </div>
                 )}
               </div>
 
+              {/* Descripción */}
+              {task.description && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Descripción</p>
+                  <div className="rounded-xl border border-border/60 bg-muted/40 px-3.5 py-3 text-sm text-foreground leading-relaxed whitespace-pre-wrap">
+                    {task.description}
+                  </div>
+                </div>
+              )}
+
+              {/* Pautas */}
               {task.guidelines && (
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Pautas de seguimiento</Label>
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">{task.guidelines}</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pautas</p>
+                  <div className="rounded-xl border border-border/60 bg-muted/40 px-3.5 py-3 text-sm text-foreground leading-relaxed whitespace-pre-wrap">
+                    {task.guidelines}
+                  </div>
                 </div>
               )}
 
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs text-muted-foreground">Etiquetas</Label>
-                  <Button variant="ghost" size="sm" className="h-6 text-xs px-2" onClick={() => setShowTagSelector(!showTagSelector)}>
-                    <TagIcon className="h-3 w-3 mr-1" /> Gestionar
-                  </Button>
-                </div>
+              {/* Tags */}
+              {task.tags && task.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
-                  {taskTags.length === 0 && <span className="text-xs text-muted-foreground/40 italic">Sin etiquetas</span>}
-                  {taskTags.map((tag) => <TagBadge key={tag.id} tag={tag} onRemove={() => handleTagToggle(tag)} />)}
-                </div>
-                {showTagSelector && (
-                  <div className="rounded-lg border p-2 flex flex-wrap gap-1.5 bg-muted/20">
-                    {availableTags.map((tag) => {
-                      const selected = taskTags.some((t) => t.id === tag.id)
-                      return (
-                        <button key={tag.id} onClick={() => handleTagToggle(tag)}
-                          className={cn("rounded-full px-2.5 py-1 text-[10px] font-medium text-white transition-opacity", !selected && "opacity-35")}
-                          style={{ backgroundColor: tag.color }}>
-                          {tag.name}
-                        </button>
-                      )
-                    })}
-                    {availableTags.length === 0 && <span className="text-xs text-muted-foreground">Sin etiquetas para este proyecto</span>}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Personal asignado</Label>
-                <div className="flex flex-wrap gap-2">
-                  {assignedUsers.map((u) => (
-                    <div key={u.id} className="flex items-center gap-1.5 rounded-full bg-primary/5 border border-primary/10 px-2.5 py-1 text-xs">
-                      <div className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center text-[9px] font-bold text-primary">
-                        {u.name.charAt(0)}
-                      </div>
-                      {u.name.split(" ")[0]}
-                    </div>
+                  {task.tags.map((tag) => (
+                    <TagPill key={tag.id} tag={tag} />
                   ))}
-                  {assignedUsers.length === 0 && <span className="text-xs text-muted-foreground/40 italic">Sin asignar</span>}
-                </div>
-              </div>
-
-              <div>
-                {!showAlertForm ? (
-                  <Button variant="outline" size="sm" className="gap-2 text-xs" onClick={() => setShowAlertForm(true)}>
-                    <Bell className="h-3.5 w-3.5" /> Configurar alarma
-                  </Button>
-                ) : (
-                  <AlertDialog taskId={task.id} onClose={() => setShowAlertForm(false)} />
-                )}
-              </div>
-            </TabsContent>
-
-            {/* Checklist */}
-            <TabsContent value="checklist" className="mt-0 px-5 py-4">
-              {activities.length > 0 && (
-                <div className="flex items-center gap-3 mb-4 p-3 rounded-lg bg-muted/30">
-                  <Progress value={progress} className="h-2 flex-1" />
-                  <span className={cn("text-sm font-bold tabular-nums shrink-0", progress === 100 ? "text-emerald-500" : "text-primary")}>
-                    {progress}%
-                  </span>
-                  <span className="text-xs text-muted-foreground shrink-0">{completedCount}/{activities.length} pasos</span>
                 </div>
               )}
-              <div className="space-y-1 mb-4">
-                {activities.map((a) => (
-                  <div key={a.id}
-                    className={cn("flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors cursor-pointer",
-                      a.completed ? "bg-emerald-500/8" : "hover:bg-muted/40"
-                    )}
-                    onClick={() => handleToggleActivity(a.id, !a.completed)}
-                  >
-                    {a.completed
-                      ? <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
-                      : <Circle className="h-5 w-5 text-muted-foreground/40 shrink-0" />
-                    }
-                    <span className={cn("text-sm flex-1", a.completed && "line-through text-muted-foreground/50")}>
-                      {a.name}
-                    </span>
-                  </div>
-                ))}
-                {activities.length === 0 && (
-                  <p className="text-sm text-muted-foreground/40 italic text-center py-8">Sin pasos definidos</p>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <Input value={newCheckItem} onChange={(e) => setNewCheckItem(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleAddCheckItem()}
-                  placeholder="Agregar paso..." className="h-9"
-                  disabled={addingCheckItem} />
-                <Button variant="outline" size="sm" className="h-9 px-3" onClick={handleAddCheckItem}
-                  disabled={!newCheckItem.trim() || addingCheckItem}>
-                  {addingCheckItem ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                </Button>
+
+              {/* Documentos compartidos */}
+              <div className="pt-1 border-t border-border/40">
+                <SharedLinksPanel apiBase={`/api/tasks/${task.id}`} />
               </div>
             </TabsContent>
 
-            {/* Comentarios */}
-            <TabsContent value="comentarios" className="mt-0 flex flex-col">
-              <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-                <p className="text-xs text-muted-foreground">{comments.length} comentario{comments.length !== 1 ? "s" : ""}</p>
-                <Button variant="ghost" size="sm" className="h-6 text-xs px-2 gap-1" onClick={() => setSortDesc(!sortDesc)}>
-                  <ArrowUpDown className="h-3 w-3" />
-                  {sortDesc ? "Más reciente" : "Más antiguo"}
-                </Button>
-              </div>
-              <div className="px-5 space-y-3 pb-2 max-h-64 overflow-y-auto">
-                {commentsLoading ? (
-                  <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-                ) : sortedComments.length === 0 ? (
-                  <p className="text-sm text-muted-foreground/40 italic text-center py-10">Sin comentarios aún</p>
-                ) : (
-                  sortedComments.map((c) => {
-                    const author = allUsers.find((u) => u.id === c.authorId)
-                    return (
-                      <div key={c.id} className="flex gap-3">
-                        <div className="h-7 w-7 rounded-full bg-primary/10 border border-primary/10 flex items-center justify-center text-[10px] font-bold text-primary shrink-0 mt-0.5">
-                          {author?.name?.charAt(0) ?? "?"}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-baseline gap-2 mb-0.5">
-                            <span className="text-xs font-semibold">{author?.name?.split(" ")[0]}</span>
-                            <span className="text-[10px] text-muted-foreground">
-                              {new Date(c.createdAt).toLocaleString("es-CL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
-                            </span>
-                          </div>
-                          <p className="text-sm text-muted-foreground leading-relaxed">{c.text}</p>
-                        </div>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-              <div className="flex gap-2 px-5 py-3 border-t shrink-0">
-                <Input value={commentText} onChange={(e) => setCommentText(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleAddComment()}
-                  placeholder="Escribir comentario..." className="h-9" />
-                <Button size="sm" className="h-9 px-3" onClick={handleAddComment} disabled={!commentText.trim()}>
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
+            {/* ── Progreso ── */}
+            <TabsContent value="progreso" className="p-4 space-y-4 m-0">
+              {activities.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span className="font-medium">{completedCount} de {activities.length} completados</span>
+                    <span className="font-semibold text-foreground">{progress}%</span>
+                  </div>
+                  <Progress value={progress} className="h-2 rounded-full" />
+                </div>
+              )}
+
+              {activitiesLoading ? (
+                <div className="flex justify-center py-6">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {activities.map((act) => (
+                    <button
+                      key={act.id}
+                      onClick={() => handleToggleActivity(act.id, !act.completed)}
+                      className={cn(
+                        "group flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-all",
+                        act.completed
+                          ? "border-emerald-500/20 bg-emerald-500/5"
+                          : "border-border bg-muted/30 hover:bg-muted/60"
+                      )}
+                    >
+                      {act.completed
+                        ? <CheckCircle2 className="h-4.5 w-4.5 mt-0.5 shrink-0 text-emerald-500" />
+                        : <Circle className="h-4.5 w-4.5 mt-0.5 shrink-0 text-muted-foreground group-hover:text-primary transition-colors" />
+                      }
+                      <span className={cn(
+                        "text-sm leading-snug",
+                        act.completed ? "line-through text-muted-foreground" : "text-foreground"
+                      )}>
+                        {act.name}
+                      </span>
+                    </button>
+                  ))}
+
+                </div>
+              )}
+            </TabsContent>
+
+            {/* ── Chat ── */}
+            <TabsContent value="chat" className="p-4 m-0">
+              {isOpen && (
+                <ChatPanel
+                  taskId={task.id}
+                  useTaskChat={true}
+                  mentionableUsers={mentionableUsers}
+                  title="Chat del equipo"
+                  placeholder="Escribí un mensaje... (@ para mencionar)"
+                  allowImages={true}
+                  className="border-0 rounded-xl"
+                />
+              )}
             </TabsContent>
           </Tabs>
         </div>
@@ -523,351 +444,423 @@ function TaskDetailPanel({
   )
 }
 
-// ─── Status Group ───────────────────────────────────────────────
-function StatusGroup({
-  status,
-  tasks,
+// ── Task Card ──────────────────────────────────────────────────────────────
+
+function TaskCard({
+  task,
+  isExpanded,
+  defaultTab,
   allUsers,
-  availableTags,
-  expandedTaskId,
-  onToggleTask,
-  onUpdate,
-  onTagsUpdate,
+  onToggle,
+  onStatusChange,
 }: {
-  status: TaskStatus
-  tasks: (Task & { _projectName: string; _projectId: string })[]
+  task: ExtendedTask
+  isExpanded: boolean
+  defaultTab?: WorkerTaskTab
   allUsers: User[]
-  availableTags: Tag[]
-  expandedTaskId: string | null
-  onToggleTask: (id: string) => void
-  onUpdate: (taskId: string, updates: Partial<Task>) => void
-  onTagsUpdate: (taskId: string, tags: Tag[]) => void
+  onToggle: () => void
+  onStatusChange: (taskId: string, status: TaskStatus) => void
 }) {
-  const [expanded, setExpanded] = useState(true)
-  const cfg = STATUS_CONFIG[status]
+  const cfg = STATUS_CONFIG[task.status]
+  const assignedUsers = allUsers.filter((u) => task.assignedTo?.includes(u.id))
 
   return (
-    <div className="rounded-lg border bg-card overflow-hidden">
+    <div className={cn(
+      "group rounded-2xl border bg-card transition-all duration-200",
+      isExpanded ? "border-primary/30 shadow-md shadow-primary/5" : "border-border hover:border-border/80 hover:shadow-sm"
+    )}>
+      {/* Card header — always visible */}
       <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors"
+        onClick={onToggle}
+        className="w-full text-left px-4 py-4 flex items-start gap-3"
       >
-        {expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
-        <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium border", cfg.color)}>
-          {cfg.icon}
-          {cfg.label}
-        </span>
-        <span className="text-xs text-muted-foreground ml-auto">{tasks.length}</span>
+        {/* Status dot accent */}
+        <div className={cn("mt-1.5 h-2.5 w-2.5 rounded-full shrink-0 ring-2 ring-card", cfg.dot)} />
+
+        {/* Content */}
+        <div className="flex-1 min-w-0 space-y-2">
+          {/* Top row */}
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xs font-mono text-muted-foreground shrink-0">
+                #{task.correlativeId}
+              </span>
+              <span className={cn(
+                "font-semibold text-sm text-foreground truncate",
+                task.status === "finalizado" && "line-through text-muted-foreground"
+              )}>
+                {task.name}
+              </span>
+            </div>
+            <ChevronDown className={cn(
+              "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 mt-0.5",
+              isExpanded && "rotate-180"
+            )} />
+          </div>
+
+          {/* Middle row: project + due date + priority */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={cn(
+              "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
+              cfg.color, cfg.bg, cfg.border
+            )}>
+              {cfg.icon}
+              {cfg.label}
+            </span>
+            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+              <FolderKanban className="h-3 w-3" />
+              {task._projectName}
+            </span>
+            {task.dueDate && (
+              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <CalendarDays className="h-3 w-3" />
+                {format(new Date(task.dueDate), "d MMM", { locale: es })}
+              </span>
+            )}
+            <div className="flex items-center gap-1 ml-auto">
+              <PriorityDots priority={task.priority} />
+              {assignedUsers.length > 0 && (
+                <div className="flex items-center -space-x-1.5 ml-2">
+                  {assignedUsers.slice(0, 3).map((u) => (
+                    <div
+                      key={u.id}
+                      title={u.name}
+                      className={cn(
+                        "flex h-5 w-5 items-center justify-center rounded-full text-[8px] font-bold text-white ring-1 ring-card",
+                        avatarColor(u.name)
+                      )}
+                    >
+                      {getInitials(u.name)}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Tags */}
+          {task.tags && task.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {task.tags.map((tag) => <TagPill key={tag.id} tag={tag} />)}
+            </div>
+          )}
+        </div>
       </button>
 
-      {expanded && tasks.length > 0 && (
-        <div className="border-t divide-y">
-          {tasks.map((task) => {
-            const isExpanded = expandedTaskId === task.id
-            const assignedUsers = allUsers.filter((u) => task.assignedTo.includes(u.id))
-            const completedActs = task.activities.filter((a) => a.completed).length
-            const progress = task.activities.length > 0
-              ? Math.round((completedActs / task.activities.length) * 100)
-              : 0
+      {/* Expandable detail panel */}
+      <TaskDetailPanel
+        task={task}
+        allUsers={allUsers}
+        isOpen={isExpanded}
+        defaultTab={defaultTab}
+        onStatusChange={onStatusChange}
+      />
+    </div>
+  )
+}
 
-            return (
-              <div key={task.id}>
-                <div
-                  className={cn(
-                    "flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors",
-                    isExpanded ? "bg-primary/5" : "hover:bg-muted/20"
-                  )}
-                  onClick={() => onToggleTask(task.id)}
-                >
-                  <span className="text-[10px] text-muted-foreground font-mono font-semibold shrink-0 w-8">
-                    #{task.correlativeId}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={cn("text-sm font-medium truncate", task.status === "finalizado" && "line-through text-muted-foreground")}>
-                        {task.name}
-                      </span>
-                      {task.tags?.slice(0, 3).map((tag) => <TagBadge key={tag.id} tag={tag} />)}
-                      {(task.tags?.length ?? 0) > 3 && (
-                        <span className="text-[10px] text-muted-foreground">+{task.tags!.length - 3}</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
-                      <span>{task._projectName}</span>
-                      {task.dueDate && (
-                        <>
-                          <span>·</span>
-                          <span>{new Date(task.dueDate).toLocaleDateString("es-CL", { day: "numeric", month: "short" })}</span>
-                        </>
-                      )}
-                      {task.activities.length > 0 && (
-                        <>
-                          <span>·</span>
-                          <span>{completedActs}/{task.activities.length} pasos</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  {task.activities.length > 0 && (
-                    <div className="w-12 shrink-0">
-                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className={cn("h-full rounded-full", progress === 100 ? "bg-emerald-500" : "bg-primary")}
-                          style={{ width: `${progress}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex -space-x-1.5 shrink-0">
-                    {assignedUsers.slice(0, 3).map((u) => (
-                      <div key={u.id} title={u.name}
-                        className="h-6 w-6 rounded-full bg-primary/10 border-2 border-background flex items-center justify-center text-[9px] font-bold text-primary">
-                        {u.name.charAt(0)}
-                      </div>
-                    ))}
-                  </div>
-                  <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform duration-200", isExpanded ? "rotate-180 text-primary" : "text-muted-foreground")} />
-                </div>
-                <TaskDetailPanel
-                  isOpen={isExpanded}
-                  task={task}
-                  allUsers={allUsers}
-                  availableTags={availableTags.filter((t) => t.projectId === null || t.projectId === task._projectId)}
-                  onUpdate={onUpdate}
-                  onTagsUpdate={onTagsUpdate}
-                />
-              </div>
-            )
-          })}
+// ── Main Page ──────────────────────────────────────────────────────────────
+
+function WorkerTasksPageContent() {
+  const { user } = useAuth()
+  const searchParams = useSearchParams()
+
+  const [tasks, setTasks] = useState<ExtendedTask[]>([])
+  const [allUsers, setAllUsers] = useState<User[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const [search, setSearch] = useState("")
+  const [filterStatus, setFilterStatus] = useState<TaskStatus | "all">("all")
+  const [filterProjectId, setFilterProjectId] = useState<string>("all")
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const handledTargetRef = useRef<string | null>(null)
+  const handledNotificationRef = useRef<string | null>(null)
+
+  const requestedTaskId = searchParams.get("task")
+  const requestedNotificationId = searchParams.get("notification")
+  const requestedTab: WorkerTaskTab =
+    searchParams.get("tab") === "chat" ? "chat" : "detalles"
+
+  useEffect(() => {
+    if (!requestedNotificationId || handledNotificationRef.current === requestedNotificationId) {
+      return
+    }
+
+    handledNotificationRef.current = requestedNotificationId
+    fetch("/api/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [requestedNotificationId] }),
+    }).catch(() => {})
+  }, [requestedNotificationId])
+
+  const fetchData = useCallback(async () => {
+    if (!user) return
+    try {
+      const [tasksRes, usersRes] = await Promise.all([
+        fetch("/api/tasks"),
+        fetch("/api/users/mentionable"),
+      ])
+      const [tasksData, usersData] = await Promise.all([
+        tasksRes.ok ? tasksRes.json() : [],
+        usersRes.ok ? usersRes.json() : [],
+      ])
+
+      // /api/tasks returns tasks with projectName and assignedTo already resolved
+      type RawTask = Task & { projectName: string }
+      const extended: ExtendedTask[] = (tasksData as RawTask[]).map((t) => ({
+        ...t,
+        _projectName: t.projectName ?? "Proyecto",
+        _projectId: t.projectId,
+      }))
+
+      // Derive unique projects list from tasks for the filter pills
+      const projectMap = new Map<string, string>()
+      extended.forEach((t) => projectMap.set(t._projectId, t._projectName))
+      const derivedProjects: Project[] = [...projectMap.entries()].map(([id, name]) => ({
+        id,
+        name,
+      } as Project))
+
+      setTasks(extended)
+      setAllUsers(usersData)
+      setProjects(derivedProjects)
+    } catch {
+      toast.error("Error al cargar tareas")
+    } finally {
+      setLoading(false)
+    }
+  }, [user])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  useEffect(() => {
+    if (loading || !requestedTaskId) {
+      if (!requestedTaskId) handledTargetRef.current = null
+      return
+    }
+
+    const targetTask = tasks.find((task) => task.id === requestedTaskId)
+    if (!targetTask) return
+
+    const navigationKey = `${requestedTaskId}:${requestedTab}`
+    if (handledTargetRef.current === navigationKey) return
+
+    handledTargetRef.current = navigationKey
+    setSearch("")
+    setFilterStatus("all")
+    setFilterProjectId("all")
+    setExpandedId(requestedTaskId)
+  }, [loading, requestedTaskId, requestedTab, tasks])
+
+  async function handleStatusChange(taskId: string, status: TaskStatus) {
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)))
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      })
+      if (!res.ok) throw new Error()
+    } catch {
+      toast.error("Error al actualizar estado")
+      fetchData()
+    }
+  }
+
+  // ── Filtered tasks ──
+  const filtered = tasks.filter((t) => {
+    if (search && !t.name.toLowerCase().includes(search.toLowerCase())) return false
+    if (filterStatus !== "all" && t.status !== filterStatus) return false
+    if (filterProjectId !== "all" && t._projectId !== filterProjectId) return false
+    return true
+  })
+
+  // ── Group by status ──
+  const grouped = (Object.keys(STATUS_CONFIG) as TaskStatus[])
+    .sort((a, b) => STATUS_CONFIG[a].order - STATUS_CONFIG[b].order)
+    .map((status) => ({
+      status,
+      tasks: filtered.filter((t) => t.status === status),
+    }))
+    .filter((g) => g.tasks.length > 0)
+
+  const activeCount = tasks.filter((t) => t.status !== "finalizado").length
+  const completedCount = tasks.filter((t) => t.status === "finalizado").length
+
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 animate-fade-in">
+        <div className="space-y-2">
+          <div className="h-7 w-40 rounded-lg skeleton-shimmer" />
+          <div className="h-4 w-56 rounded skeleton-shimmer" />
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="h-16 rounded-xl skeleton-shimmer" />
+          ))}
+        </div>
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-20 rounded-xl skeleton-shimmer" />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 page-enter">
+      {/* ── Header ── */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground tracking-tight">Mis Tareas</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {activeCount} activa{activeCount !== 1 ? "s" : ""} · {completedCount} finalizada{completedCount !== 1 ? "s" : ""}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Filters ── */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar tarea..."
+            className="pl-9 h-9 bg-muted border-0 rounded-xl"
+          />
+        </div>
+
+        {/* Status filter pills */}
+        <div className="flex gap-1.5 flex-wrap">
+          <button
+            onClick={() => setFilterStatus("all")}
+            className={cn(
+              "rounded-xl px-3 py-1.5 text-xs font-medium transition-all",
+              filterStatus === "all"
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            )}
+          >
+            Todas
+          </button>
+          {(["en_curso", "pendiente", "retrasado", "listo_para_revision"] as TaskStatus[]).map((s) => (
+            <button
+              key={s}
+              onClick={() => setFilterStatus(filterStatus === s ? "all" : s)}
+              className={cn(
+                "rounded-xl px-3 py-1.5 text-xs font-medium transition-all",
+                filterStatus === s
+                  ? cn(STATUS_CONFIG[s].bg, STATUS_CONFIG[s].color, "border", STATUS_CONFIG[s].border)
+                  : "bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+              )}
+            >
+              {STATUS_CONFIG[s].label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Project filter (if multiple projects) ── */}
+      {projects.length > 1 && (
+        <div className="flex gap-1.5 flex-wrap">
+          <button
+            onClick={() => setFilterProjectId("all")}
+            className={cn(
+              "rounded-xl px-3 py-1.5 text-xs font-medium transition-all",
+              filterProjectId === "all"
+                ? "bg-foreground text-background"
+                : "bg-muted text-muted-foreground hover:bg-accent"
+            )}
+          >
+            Todos los proyectos
+          </button>
+          {projects
+            .filter((p) => tasks.some((t) => t._projectId === p.id))
+            .map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setFilterProjectId(filterProjectId === p.id ? "all" : p.id)}
+                className={cn(
+                  "rounded-xl px-3 py-1.5 text-xs font-medium transition-all flex items-center gap-1.5",
+                  filterProjectId === p.id
+                    ? "bg-foreground text-background"
+                    : "bg-muted text-muted-foreground hover:bg-accent"
+                )}
+              >
+                <FolderKanban className="h-3 w-3" />
+                {p.name}
+              </button>
+            ))}
         </div>
       )}
 
-      {expanded && tasks.length === 0 && (
-        <div className="border-t px-4 py-3 text-xs text-muted-foreground/50">
-          Sin tareas en este estado
+      {/* ── Task list ── */}
+      {filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted">
+            <CheckCheck className="h-7 w-7 text-muted-foreground" />
+          </div>
+          <p className="text-sm font-medium text-muted-foreground">
+            {search || filterStatus !== "all" || filterProjectId !== "all"
+              ? "No hay tareas que coincidan con los filtros"
+              : "No tenés tareas asignadas aún"}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {grouped.map(({ status, tasks: groupTasks }) => {
+            const cfg = STATUS_CONFIG[status]
+            return (
+              <div key={status} className="space-y-2">
+                {/* Group header */}
+                <div className="flex items-center gap-2 px-1">
+                  <div className={cn("flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide", cfg.color)}>
+                    {cfg.icon}
+                    {cfg.label}
+                  </div>
+                  <span className={cn(
+                    "flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-bold",
+                    cfg.bg, cfg.color
+                  )}>
+                    {groupTasks.length}
+                  </span>
+                </div>
+
+                {/* Cards */}
+                <div className="space-y-2">
+                  {groupTasks.map((task) => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      isExpanded={expandedId === task.id}
+                      defaultTab={requestedTaskId === task.id ? requestedTab : "detalles"}
+                      allUsers={allUsers}
+                      onToggle={() => setExpandedId((id) => id === task.id ? null : task.id)}
+                      onStatusChange={handleStatusChange}
+                    />
+                  ))}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
   )
 }
 
-// ─── Main Page ──────────────────────────────────────────────────
-export default function TrabajadorTareasPage() {
-  const { user } = useAuth()
-  const [projects, setProjects] = useState<Project[]>([])
-  const [allUsers, setAllUsers] = useState<User[]>([])
-  const [availableTags, setAvailableTags] = useState<Tag[]>([])
-  const [loading, setLoading] = useState(true)
-
-  const [filterProject, setFilterProject] = useState("all")
-  const [search, setSearch] = useState("")
-  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
-
-  const [showCreate, setShowCreate] = useState(false)
-  const [createForm, setCreateForm] = useState({ name: "", description: "", projectId: "" })
-  const [createLoading, setCreateLoading] = useState(false)
-
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true)
-      try {
-        const [pRes, uRes, tRes] = await Promise.all([
-          fetch("/api/projects"),
-          fetch("/api/users"),
-          fetch("/api/tags"),
-        ])
-        const [pData, uData, tData] = await Promise.all([pRes.json(), uRes.json(), tRes.json()])
-        setProjects(Array.isArray(pData) ? pData : [])
-        setAllUsers(Array.isArray(uData) ? uData : [])
-        setAvailableTags(Array.isArray(tData) ? tData : [])
-      } catch {
-        toast.error("Error al cargar datos")
-      } finally {
-        setLoading(false)
-      }
-    }
-    load()
-  }, [])
-
-  // Projects where this worker is assigned
-  const myProjects = projects.filter((p) =>
-    (p.assignedWorkers ?? []).includes(user?.id ?? "")
-  )
-
-  // All tasks from my projects
-  const allTasks = myProjects.flatMap((p) =>
-    (p.tasks ?? []).map((t) => ({ ...t, _projectId: p.id, _projectName: p.name }))
-  )
-
-  const filteredTasks = allTasks.filter((t) => {
-    if (filterProject !== "all" && t._projectId !== filterProject) return false
-    if (search && !t.name.toLowerCase().includes(search.toLowerCase())) return false
-    return true
-  })
-
-  const tasksByStatus = STATUS_ORDER.reduce((acc, status) => {
-    acc[status] = filteredTasks.filter((t) => t.status === status)
-    return acc
-  }, {} as Record<TaskStatus, typeof filteredTasks>)
-
-  function handleToggleTask(taskId: string) {
-    setExpandedTaskId((prev) => prev === taskId ? null : taskId)
-  }
-
-  function handleTaskUpdate(taskId: string, updates: Partial<Task>) {
-    setProjects((prev) =>
-      prev.map((p) => ({
-        ...p,
-        tasks: (p.tasks ?? []).map((t) => t.id === taskId ? { ...t, ...updates } : t),
-      }))
-    )
-  }
-
-  function handleTagsUpdate(taskId: string, newTags: Tag[]) {
-    setProjects((prev) =>
-      prev.map((p) => ({
-        ...p,
-        tasks: (p.tasks ?? []).map((t) => t.id === taskId ? { ...t, tags: newTags } : t),
-      }))
-    )
-  }
-
-  async function handleCreateTask() {
-    if (!createForm.name.trim() || !createForm.projectId || !user) return
-    setCreateLoading(true)
-    try {
-      const res = await fetch(`/api/projects/${createForm.projectId}/tasks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: createForm.name, description: createForm.description }),
-      })
-      if (!res.ok) {
-        toast.error("Error al crear tarea")
-        return
-      }
-      const newTask = await res.json()
-      setProjects((prev) =>
-        prev.map((p) =>
-          p.id === createForm.projectId
-            ? { ...p, tasks: [...(p.tasks ?? []), newTask] }
-            : p
-        )
-      )
-      toast.success(`Tarea #${newTask.correlativeId} creada`)
-      setShowCreate(false)
-      setCreateForm({ name: "", description: "", projectId: "" })
-    } catch {
-      toast.error("Error al crear tarea")
-    } finally {
-      setCreateLoading(false)
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-48">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-      </div>
-    )
-  }
-
+export default function WorkerTasksPage() {
   return (
-    <div className="space-y-5 page-enter">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Mis Tareas</h1>
-          <p className="text-sm text-muted-foreground">{filteredTasks.length} tareas · {myProjects.length} proyectos</p>
-        </div>
-        <Button size="sm" onClick={() => setShowCreate(true)} disabled={myProjects.length === 0}>
-          <Plus className="h-4 w-4 mr-1" /> Nueva tarea
-        </Button>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2 items-center">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Buscar tarea..." className="pl-9 h-9" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <Select value={filterProject} onValueChange={setFilterProject}>
-          <SelectTrigger className="w-[200px] h-9"><SelectValue placeholder="Proyecto" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos los proyectos</SelectItem>
-            {myProjects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {myProjects.length === 0 ? (
-        <div className="rounded-lg border bg-card p-12 text-center">
-          <p className="text-muted-foreground text-sm">No estás asignado a ningún proyecto actualmente.</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {STATUS_ORDER.map((status) => (
-            <StatusGroup
-              key={status}
-              status={status}
-              tasks={tasksByStatus[status]}
-              allUsers={allUsers}
-              availableTags={availableTags}
-              expandedTaskId={expandedTaskId}
-              onToggleTask={handleToggleTask}
-              onUpdate={handleTaskUpdate}
-              onTagsUpdate={handleTagsUpdate}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Create Task Dialog */}
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Nueva Tarea</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label>Proyecto *</Label>
-              <Select
-                value={createForm.projectId}
-                onValueChange={(v) => setCreateForm((f) => ({ ...f, projectId: v }))}
-              >
-                <SelectTrigger><SelectValue placeholder="Seleccionar proyecto" /></SelectTrigger>
-                <SelectContent>
-                  {myProjects.filter((p) => p.status === "Activo").map((p) => (
-                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Título *</Label>
-              <Input
-                value={createForm.name}
-                onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="Ej: Revisión de planos"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Descripción</Label>
-              <Textarea
-                value={createForm.description}
-                onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
-                rows={2}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button>
-            <Button
-              onClick={handleCreateTask}
-              disabled={!createForm.name.trim() || !createForm.projectId || createLoading}
-            >
-              {createLoading ? "Creando..." : "Crear tarea"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+    <Suspense>
+      <WorkerTasksPageContent />
+    </Suspense>
   )
 }

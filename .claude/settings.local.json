@@ -10,7 +10,22 @@
       "Bash(pnpm:*)",
       "Bash(npx skills:*)",
       "Bash(npx:*)",
-      "mcp__plugin_engram_engram__mem_search"
+      "mcp__plugin_engram_engram__mem_search",
+      "mcp__plugin_engram_engram__mem_save_prompt",
+      "Bash(for file:*)",
+      "Bash(do)",
+      "Bash(if grep:*)",
+      "Bash(! grep:*)",
+      "Bash(then)",
+      "Bash(find \"C:\\\\Users\\\\mathi\\\\ing-pass\\\\app\\\\api\" -name \"*.ts\" -exec grep -L \"export const runtime\" {})",
+      "Bash(while read:*)",
+      "Bash(do if:*)",
+      "Bash(then echo:*)",
+      "Bash(find C:Usersmathiing-pass -name *migration* -o -name *.sql)",
+      "Bash(npm run:*)",
+      "Bash(ls C:Usersmathiing-pass.env*)",
+      "Bash(head:*)",
+      "Bash(grep -n \"export.*\\\\\\(GET\\\\|POST\\\\|PUT\\\\|PATCH\\\\|DELETE\\\\\\)\" /c/Users/mathi/ing-pass/app/api/tasks/[id]/route.ts)"
     ]
   }
 }

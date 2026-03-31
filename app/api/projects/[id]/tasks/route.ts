@@ -1,10 +1,35 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/db"
-import { tasks, taskAssignments, activities, documents, projectWorkers, taskTags, tags } from "@/db/schema"
+import { tasks, taskAssignments, activities, documents, projectWorkers, taskTags, tags, notifications } from "@/db/schema"
 import { taskSchema } from "@/lib/schemas"
 import { and, eq, inArray, max } from "drizzle-orm"
 import { getAuthUser } from "@/lib/api-auth"
 import { getProjectAccessContext } from "@/lib/project-access"
+
+async function createTaskAssignedNotifications(input: {
+  taskId: string
+  taskName: string
+  assignedTo: string[]
+  assignedById: string
+  assignedByName: string
+}) {
+  const usersToNotify = input.assignedTo.filter((id) => id !== input.assignedById)
+  if (usersToNotify.length === 0) return
+  try {
+    await db.insert(notifications).values(
+      usersToNotify.map((userId) => ({
+        userId,
+        type: "task_assigned" as const,
+        entityType: "task" as const,
+        entityId: input.taskId,
+        fromUserId: input.assignedById,
+        message: `${input.assignedByName} te asignó la tarea "${input.taskName}"`,
+      }))
+    )
+  } catch (err) {
+    console.error("Error creating task_assigned notifications:", err)
+  }
+}
 
 const CORRELATIVE_CONSTRAINT = "tasks_project_correlative_unique"
 const MAX_CORRELATIVE_RETRIES = 3
@@ -248,8 +273,25 @@ export async function POST(
       )
     }
 
+    const createdTagRows = tagIds.length > 0
+      ? await db
+          .select({ id: tags.id, name: tags.name, color: tags.color, projectId: tags.projectId, createdBy: tags.createdBy, createdAt: tags.createdAt })
+          .from(tags)
+          .where(inArray(tags.id, tagIds))
+      : []
+
+    if (assignedTo.length > 0) {
+      void createTaskAssignedNotifications({
+        taskId: newTask.id,
+        taskName: newTask.name,
+        assignedTo,
+        assignedById: authUser.id,
+        assignedByName: authUser.name,
+      })
+    }
+
     return NextResponse.json(
-      { ...newTask, assignedTo, activities: [], documents: [], tags: [] },
+      { ...newTask, assignedTo, activities: [], documents: [], tags: createdTagRows },
       { status: 201 }
     )
   } catch (error) {

@@ -1,9 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, Suspense } from "react"
+import { useSearchParams } from "next/navigation"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { ExportDialog } from "@/components/export-dialog"
-import type { Task, TaskStatus, Project, User, Tag, Comment, Activity } from "@/lib/types"
+import type { Task, TaskStatus, Project, User, Tag, Activity } from "@/lib/types"
+import { ChatPanel } from "@/components/chat-panel"
+import { SharedLinksPanel } from "@/components/shared-links-panel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -14,6 +17,7 @@ import { Progress } from "@/components/ui/progress"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -31,14 +35,12 @@ import {
   ChevronDown,
   ChevronRight,
   MessageSquare,
-  Send,
   CheckCircle2,
   Circle,
   Bell,
   Tag as TagIcon,
   X,
   Pencil,
-  ArrowUpDown,
   AlertCircle,
   Clock,
   CheckCheck,
@@ -76,6 +78,8 @@ const STATUS_LEFT_BORDER: Record<TaskStatus, string> = {
   listo_para_revision: "border-l-violet-500",
   finalizado:          "border-l-emerald-500",
 }
+
+const TAG_PRESET_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#3b82f6","#ef4444","#8b5cf6","#14b8a6","#f97316","#64748b"]
 
 // ─── Tag Badge ──────────────────────────────────────────────────
 function TagBadge({ tag, onRemove }: { tag: Tag; onRemove?: () => void }) {
@@ -166,10 +170,6 @@ function TaskDetailPanel({
   onTagsUpdate: (taskId: string, tags: Tag[]) => void
 }) {
   const { user } = useAuth()
-  const [comments, setComments] = useState<Comment[]>([])
-  const [commentText, setCommentText] = useState("")
-  const [commentsLoading, setCommentsLoading] = useState(true)
-  const [sortDesc, setSortDesc] = useState(true)
   const [showAlertForm, setShowAlertForm] = useState(false)
   const [showTagSelector, setShowTagSelector] = useState(false)
   const [editingDescription, setEditingDescription] = useState(false)
@@ -180,24 +180,16 @@ function TaskDetailPanel({
   const [activities, setActivities] = useState<Activity[]>(task.activities)
   const [newCheckItem, setNewCheckItem] = useState("")
   const [addingCheckItem, setAddingCheckItem] = useState(false)
+  const [mentionableUsers, setMentionableUsers] = useState<{ id: string; name: string }[]>([])
 
   useEffect(() => {
     if (!isOpen) return
-    const load = async () => {
-      setCommentsLoading(true)
-      try {
-        const res = await fetch(`/api/tasks/${task.id}/comments`)
-        if (res.ok) setComments(await res.json())
-      } finally {
-        setCommentsLoading(false)
-      }
-    }
-    load()
-  }, [isOpen, task.id])
 
-  const sortedComments = [...comments].sort((a, b) =>
-    sortDesc ? b.createdAt.localeCompare(a.createdAt) : a.createdAt.localeCompare(b.createdAt)
-  )
+    fetch(`/api/tasks/${task.id}/mentionable`)
+      .then((response) => (response.ok ? response.json() : []))
+      .then((data) => setMentionableUsers(Array.isArray(data) ? data : []))
+      .catch(() => setMentionableUsers([]))
+  }, [isOpen, task.id])
 
   async function handleStatusChange(newStatus: TaskStatus) {
     try {
@@ -240,22 +232,6 @@ function TaskDetailPanel({
       toast.success("Pautas actualizadas")
     } catch {
       toast.error("Error al actualizar")
-    }
-  }
-
-  async function handleAddComment() {
-    if (!commentText.trim() || !user) return
-    try {
-      const res = await fetch(`/api/tasks/${task.id}/comments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: commentText.trim(), authorId: user.id, parentType: "task" }),
-      })
-      const newComment = await res.json()
-      setComments((prev) => [...prev, newComment])
-      setCommentText("")
-    } catch {
-      toast.error("Error al agregar comentario")
     }
   }
 
@@ -500,63 +476,27 @@ function TaskDetailPanel({
             </div>
           </div>
 
-          {/* ── Comentarios ── */}
-          <div className="border-t px-5 pt-4 pb-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1.5">
-                <MessageSquare className="h-3.5 w-3.5" /> Comentarios ({comments.length})
-              </p>
-              <Button variant="ghost" size="sm" className="h-6 text-xs px-2 gap-1" onClick={() => setSortDesc(!sortDesc)}>
-                <ArrowUpDown className="h-3 w-3" />
-                {sortDesc ? "Más reciente" : "Más antiguo"}
-              </Button>
+          {/* ── Documentos compartidos ── */}
+          {isOpen && (
+            <div className="border-t px-5 pt-4 pb-4">
+              <SharedLinksPanel apiBase={`/api/tasks/${task.id}`} />
             </div>
-            <div className="space-y-3 max-h-56 overflow-y-auto pr-1 mb-3">
-              {commentsLoading ? (
-                <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
-              ) : sortedComments.length === 0 ? (
-                <p className="text-xs text-muted-foreground/40 text-center py-4 italic">Sin comentarios aún</p>
-              ) : (
-                sortedComments.map((c) => {
-                  const author = allUsers.find((u) => u.id === c.authorId)
-                  return (
-                    <div key={c.id} className="flex gap-2.5">
-                      <div className="h-7 w-7 rounded-full bg-primary/10 border border-primary/10 flex items-center justify-center text-[10px] font-bold text-primary shrink-0 mt-0.5">
-                        {author?.name?.charAt(0) ?? "?"}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-xs font-semibold">{author?.name?.split(" ")[0]}</span>
-                          <span className="text-[10px] text-muted-foreground">
-                            {new Date(c.createdAt).toLocaleString("es-CL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
-                          </span>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{c.text}</p>
-                        {c.attachments && c.attachments.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 mt-1.5">
-                            {c.attachments.map((img) => (
-                              <a key={img.id} href={`data:${img.type};base64,${img.data}`} target="_blank" rel="noopener noreferrer"
-                                className="rounded overflow-hidden border border-border w-16 h-16 block hover:opacity-80 transition-opacity">
-                                <img src={`data:${img.type};base64,${img.data}`} alt={img.name} className="w-full h-full object-cover" />
-                              </a>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })
-              )}
+          )}
+
+          {/* ── Chat de tarea ── */}
+          {isOpen && (
+            <div className="border-t px-5 pt-4 pb-5">
+              <ChatPanel
+                taskId={task.id}
+                useTaskChat={true}
+                mentionableUsers={mentionableUsers}
+                title="Chat de tarea"
+                placeholder="Escribí un mensaje... (@ para mencionar)"
+                allowImages={true}
+                className="mt-2"
+              />
             </div>
-            <div className="flex gap-2">
-              <Input value={commentText} onChange={(e) => setCommentText(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddComment()}
-                placeholder="Escribir comentario..." className="h-9 text-sm" />
-              <Button size="sm" className="h-9 px-3" onClick={handleAddComment} disabled={!commentText.trim()}>
-                <Send className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </div>
+          )}
 
         </div>
       </div>
@@ -697,8 +637,9 @@ function StatusGroup({
 }
 
 // ─── Main Page ──────────────────────────────────────────────────
-export default function AdminTareasPage() {
+function AdminTareasPageContent() {
   const { user } = useAuth()
+  const searchParams = useSearchParams()
   const [projects, setProjects] = useState<Project[]>([])
   const [allUsers, setAllUsers] = useState<User[]>([])
   const [availableTags, setAvailableTags] = useState<Tag[]>([])
@@ -712,12 +653,20 @@ export default function AdminTareasPage() {
   const [search, setSearch] = useState("")
 
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
+  const handledTargetRef = useRef<string | null>(null)
+  const handledNotificationRef = useRef<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [showExport, setShowExport] = useState(false)
+  const [showTagManager, setShowTagManager] = useState(false)
+  const [newTagName, setNewTagName] = useState("")
+  const [newTagColor, setNewTagColor] = useState("#6366f1")
+  const [tagProjectId, setTagProjectId] = useState("")
   const [createForm, setCreateForm] = useState({
     name: "", description: "", projectId: "", assignedTo: [] as string[], tagIds: [] as string[],
   })
   const [createLoading, setCreateLoading] = useState(false)
+  const requestedTaskId = searchParams.get("task")
+  const requestedNotificationId = searchParams.get("notification")
 
   useEffect(() => {
     const load = async () => {
@@ -741,6 +690,19 @@ export default function AdminTareasPage() {
     load()
   }, [])
 
+  useEffect(() => {
+    if (!requestedNotificationId || handledNotificationRef.current === requestedNotificationId) {
+      return
+    }
+
+    handledNotificationRef.current = requestedNotificationId
+    fetch("/api/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [requestedNotificationId] }),
+    }).catch(() => {})
+  }, [requestedNotificationId])
+
   const coordinators = allUsers.filter((u) => u.role === "coordinador" && u.active)
   const workers = allUsers.filter((u) => u.active)
   const selectedProject = projects.find((p) => p.id === createForm.projectId)
@@ -757,6 +719,27 @@ export default function AdminTareasPage() {
       _coordinatorName: allUsers.find((u) => u.id === p.coordinatorId)?.name?.split(" ").slice(0, 2).join(" ") ?? "—",
     }))
   )
+
+  useEffect(() => {
+    if (loading || !requestedTaskId) {
+      if (!requestedTaskId) handledTargetRef.current = null
+      return
+    }
+
+    const targetTask = allTasks.find((task) => task.id === requestedTaskId)
+    if (!targetTask) return
+
+    if (handledTargetRef.current === requestedTaskId) return
+
+    handledTargetRef.current = requestedTaskId
+    setFilterProject("all")
+    setFilterTag("all")
+    setFilterWorker("all")
+    setFilterCoordinator("all")
+    setFilterStatus("all")
+    setSearch("")
+    setExpandedTaskId(requestedTaskId)
+  }, [allTasks, loading, requestedTaskId])
 
   // Apply filters
   const filteredTasks = allTasks.filter((t) => {
@@ -843,14 +826,57 @@ export default function AdminTareasPage() {
     }
   }
 
+  async function handleCreateTag() {
+    if (!newTagName.trim() || !user) return
+    try {
+      const res = await fetch("/api/tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newTagName.trim(), color: newTagColor, projectId: tagProjectId === "__global__" || !tagProjectId ? null : tagProjectId }),
+      })
+      const tag = await res.json()
+      setAvailableTags((prev) => [...prev, tag])
+      setNewTagName("")
+      toast.success("Etiqueta creada")
+    } catch {
+      toast.error("Error al crear etiqueta")
+    }
+  }
+
+  async function handleDeleteTag(tagId: string) {
+    try {
+      await fetch(`/api/tags/${tagId}`, { method: "DELETE" })
+      setAvailableTags((prev) => prev.filter((t) => t.id !== tagId))
+      toast.success("Etiqueta eliminada")
+    } catch {
+      toast.error("Error al eliminar etiqueta")
+    }
+  }
+
   const tagsForSelectedProject = availableTags.filter(
     (t) => t.projectId === null || t.projectId === createForm.projectId
   )
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-48">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      <div className="space-y-5 animate-fade-in">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <div className="h-7 w-32 rounded-lg skeleton-shimmer" />
+            <div className="h-4 w-48 rounded skeleton-shimmer" />
+          </div>
+          <div className="h-9 w-28 rounded-md skeleton-shimmer" />
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-20 rounded-xl skeleton-shimmer" />
+          ))}
+        </div>
+        <div className="space-y-3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="h-16 rounded-xl skeleton-shimmer" />
+          ))}
+        </div>
       </div>
     )
   }
@@ -868,6 +894,9 @@ export default function AdminTareasPage() {
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setShowExport(true)}>
             <Download className="h-4 w-4 mr-1" /> Exportar
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setShowTagManager(true)}>
+            <TagIcon className="h-4 w-4 mr-1" /> Etiquetas
           </Button>
           <Button size="sm" onClick={() => setShowCreate(true)}>
             <Plus className="h-4 w-4 mr-1" /> Nueva tarea
@@ -1104,6 +1133,117 @@ export default function AdminTareasPage() {
         data={allTasks as unknown as Record<string, unknown>[]}
         projects={projects.map((p) => ({ id: p.id, name: p.name }))}
       />
+
+      {/* Tag Manager Dialog */}
+      <Dialog open={showTagManager} onOpenChange={setShowTagManager}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Gestión de Etiquetas</DialogTitle>
+            <DialogDescription className="text-xs">Creá y organizá las etiquetas para clasificar tareas.</DialogDescription>
+          </DialogHeader>
+
+          {/* Form */}
+          <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Nueva etiqueta</p>
+            <div className="flex gap-2">
+              <Input
+                value={newTagName}
+                onChange={(e) => setNewTagName(e.target.value)}
+                placeholder="Nombre de la etiqueta"
+                className="flex-1"
+                onKeyDown={(e) => { if (e.key === "Enter") handleCreateTag() }}
+              />
+              <input
+                type="color"
+                value={newTagColor}
+                onChange={(e) => setNewTagColor(e.target.value)}
+                className="h-9 w-9 rounded-md border cursor-pointer p-0.5 bg-transparent"
+              />
+            </div>
+            <div className="flex gap-1.5 flex-wrap">
+              {TAG_PRESET_COLORS.map((color) => (
+                <button
+                  key={color}
+                  onClick={() => setNewTagColor(color)}
+                  className={cn("h-5 w-5 rounded-full border-2 transition-transform hover:scale-110", newTagColor === color ? "border-foreground scale-110" : "border-transparent")}
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </div>
+            <Select value={tagProjectId} onValueChange={setTagProjectId}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="Global — todos los proyectos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__global__">Global — todos los proyectos</SelectItem>
+                {projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <div className="flex items-center justify-between pt-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-muted-foreground">Preview:</span>
+                {newTagName.trim()
+                  ? <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium text-white" style={{ backgroundColor: newTagColor }}>{newTagName}</span>
+                  : <span className="text-[11px] text-muted-foreground/40 italic">ingresá un nombre</span>
+                }
+              </div>
+              <Button onClick={handleCreateTag} disabled={!newTagName.trim()} size="sm">
+                <Plus className="h-3.5 w-3.5 mr-1" /> Crear
+              </Button>
+            </div>
+          </div>
+
+          {/* Existing tags */}
+          {availableTags.length > 0 ? (
+            <div className="space-y-3 max-h-52 overflow-y-auto pr-1">
+              {availableTags.filter((t) => t.projectId === null).length > 0 && (
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">Global</p>
+                  <div className="space-y-0.5">
+                    {availableTags.filter((t) => t.projectId === null).map((tag) => (
+                      <div key={tag.id} className="flex items-center justify-between rounded-md px-2 py-1.5 hover:bg-muted/40 group">
+                        <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium text-white" style={{ backgroundColor: tag.color }}>{tag.name}</span>
+                        <button onClick={() => handleDeleteTag(tag.id)} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all p-1 rounded">
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {projects.filter((p) => availableTags.some((t) => t.projectId === p.id)).map((project) => (
+                <div key={project.id}>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">{project.name}</p>
+                  <div className="space-y-0.5">
+                    {availableTags.filter((t) => t.projectId === project.id).map((tag) => (
+                      <div key={tag.id} className="flex items-center justify-between rounded-md px-2 py-1.5 hover:bg-muted/40 group">
+                        <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium text-white" style={{ backgroundColor: tag.color }}>{tag.name}</span>
+                        <button onClick={() => handleDeleteTag(tag.id)} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all p-1 rounded">
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-6 text-muted-foreground/50 text-sm">Sin etiquetas todavía</div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowTagManager(false)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
+  )
+}
+
+export default function AdminTareasPage() {
+  return (
+    <Suspense>
+      <AdminTareasPageContent />
+    </Suspense>
   )
 }

@@ -117,7 +117,7 @@ describe("PATCH /api/tasks/[id]", () => {
     expect(res.status).toBe(200)
     expect(batchCalls).toBe(1)
     expect(deleteWhereCalls).toBe(1)
-    expect(insertedValues).toEqual([[{ taskId: "task-1", userId: "worker-1" }, { taskId: "task-1", userId: "worker-2" }]])
+    expect(insertedValues[0]).toEqual([{ taskId: "task-1", userId: "worker-1" }, { taskId: "task-1", userId: "worker-2" }])
     expect(body.assignedTo).toEqual(["worker-1", "worker-2"])
   })
 

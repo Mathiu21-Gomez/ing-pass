@@ -117,6 +117,15 @@ export interface TaskAlert {
   createdAt: string
 }
 
+// ── Link compartido ──
+export interface SharedLink {
+  id: string
+  label: string
+  url: string
+  addedBy?: string
+  createdAt?: string
+}
+
 // ── Tarea ──
 export interface Task {
   id: string
@@ -147,6 +156,7 @@ export interface Project {
   startDate: string
   endDate: string
   status: ProjectStatus
+  progress: number
   documents: DocumentAttachment[]
   urls: { label: string; url: string }[]
   tasks: Task[]

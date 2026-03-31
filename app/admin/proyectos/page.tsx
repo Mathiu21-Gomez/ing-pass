@@ -29,6 +29,7 @@ import {
 import { DeleteConfirmation } from "@/components/delete-confirmation"
 import { Progress } from "@/components/ui/progress"
 import { Plus, Pencil, Trash2, Search, Calendar, Users, ListTodo } from "lucide-react"
+import { SharedLinksPanel } from "@/components/shared-links-panel"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
@@ -47,6 +48,8 @@ export default function ProyectosPage() {
   const { data: users } = useApiData(fetchUsers, [] as User[])
   const crud = useCrud<Project>(apiProjects)
   const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [progressEditProject, setProgressEditProject] = useState<Project | null>(null)
+  const [progressValue, setProgressValue] = useState(0)
   const [form, setForm] = useState({
     name: "",
     description: "",
@@ -148,12 +151,21 @@ export default function ProyectosPage() {
     }))
   }
 
-  function getProjectProgress(project: Project) {
-    const start = new Date(project.startDate).getTime()
-    const end = new Date(project.endDate).getTime()
-    const now = Date.now()
-    if (project.status === "Finalizado") return 100
-    return Math.min(Math.max(Math.round(((now - start) / (end - start)) * 100), 0), 100)
+  async function handleUpdateProgress() {
+    if (!progressEditProject) return
+    try {
+      const res = await fetch(`/api/projects/${progressEditProject.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ progress: progressValue }),
+      })
+      if (!res.ok) throw new Error()
+      crud.update(progressEditProject.id, { progress: progressValue })
+      setProgressEditProject(null)
+      toast.success("Avance actualizado")
+    } catch {
+      toast.error("Error al actualizar avance")
+    }
   }
 
   const projectToDelete = crud.items.find((p) => p.id === crud.deleteConfirmId)
@@ -200,7 +212,11 @@ export default function ProyectosPage() {
         {filtered.map((project) => {
           const client = clients.find((c) => c.id === project.clientId)
           const assignedUsers = users.filter((u) => project.assignedWorkers.includes(u.id))
-          const progress = getProjectProgress(project)
+          const tasks = project.tasks ?? []
+          const finalizadas = tasks.filter((t) => t.status === "finalizado").length
+          const autoProgress = tasks.length > 0 ? Math.round((finalizadas / tasks.length) * 100) : null
+          const progress = autoProgress !== null ? autoProgress : (project.progress ?? 0)
+          const isAuto = autoProgress !== null
 
           return (
             <Card key={project.id} className="card-hover">
@@ -247,8 +263,19 @@ export default function ProyectosPage() {
 
                 <div>
                   <div className="mb-1 flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">Progreso temporal</span>
-                    <span className="font-medium text-foreground">{progress}%</span>
+                    <span className="text-muted-foreground">
+                      Avance{isAuto && <span className="ml-1 text-[10px] opacity-50">(auto)</span>}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium text-foreground">{progress}%</span>
+                      <button
+                        onClick={() => { setProgressEditProject(project); setProgressValue(project.progress ?? 0) }}
+                        className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                        title="Editar avance manual"
+                      >
+                        <Pencil className="h-2.5 w-2.5" />
+                      </button>
+                    </div>
                   </div>
                   <Progress value={progress} className="h-1.5" />
                 </div>
@@ -283,6 +310,10 @@ export default function ProyectosPage() {
                       {task.name}
                     </span>
                   ))}
+                </div>
+
+                <div className="pt-2 border-t border-border/40">
+                  <SharedLinksPanel apiBase={`/api/projects/${project.id}`} />
                 </div>
               </CardContent>
             </Card>
@@ -447,6 +478,60 @@ export default function ProyectosPage() {
         description="Se eliminarán todas las tareas y entradas de tiempo asociadas."
         itemName={projectToDelete?.name}
       />
+
+      {/* Progress edit dialog */}
+      <Dialog open={!!progressEditProject} onOpenChange={(open) => !open && setProgressEditProject(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Editar avance</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground truncate">{progressEditProject?.name}</p>
+
+            {/* Auto progress reference */}
+            {(() => {
+              const t = progressEditProject?.tasks ?? []
+              const fin = t.filter((x) => x.status === "finalizado").length
+              const auto = t.length > 0 ? Math.round((fin / t.length) * 100) : null
+              return auto !== null ? (
+                <div className="rounded-lg border bg-muted/30 px-3 py-2 flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">Calculado por tareas <span className="opacity-60">({fin}/{t.length} finalizadas)</span></span>
+                  <span className="font-semibold tabular-nums">{auto}%</span>
+                </div>
+              ) : null
+            })()}
+
+            {/* Manual slider */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Ajuste manual</span>
+                <span className="font-semibold tabular-nums text-lg">{progressValue}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={progressValue}
+                onChange={(e) => setProgressValue(Number(e.target.value))}
+                className="w-full accent-primary"
+              />
+              <Progress value={progressValue} className="h-2" />
+              <div className="flex justify-between text-[10px] text-muted-foreground/60">
+                <span>0%</span>
+                <span>25%</span>
+                <span>50%</span>
+                <span>75%</span>
+                <span>100%</span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProgressEditProject(null)}>Cancelar</Button>
+            <Button onClick={handleUpdateProgress}>Guardar manual</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

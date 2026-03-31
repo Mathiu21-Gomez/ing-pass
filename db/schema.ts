@@ -75,6 +75,16 @@ export const commentParentTypeEnum = pgEnum("comment_parent_type", [
   "activity",
 ])
 
+export const taskChatMessageKindEnum = pgEnum("task_chat_message_kind", [
+  "user",
+  "system",
+])
+
+export const taskChatAttachmentSourceEnum = pgEnum("task_chat_attachment_source", [
+  "manual",
+  "clipboard",
+])
+
 // ══════════════════════════════════════════════════════════════
 //  Better Auth tables — IDs must remain `text` (framework req)
 // ══════════════════════════════════════════════════════════════
@@ -191,6 +201,7 @@ export const projects = pgTable("projects", {
   startDate: date("start_date").notNull(),
   endDate: date("end_date").notNull(),
   status: projectStatusEnum("status").notNull().default("Activo"),
+  progress: integer("progress").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 })
 
@@ -214,6 +225,19 @@ export const projectUrls = pgTable("project_urls", {
     .references(() => projects.id, { onDelete: "cascade" }),
   label: varchar("label", { length: 200 }).notNull(),
   url: text("url").notNull(),
+})
+
+export const taskLinks = pgTable("task_links", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  taskId: uuid("task_id")
+    .notNull()
+    .references(() => tasks.id, { onDelete: "cascade" }),
+  label: varchar("label", { length: 200 }).notNull(),
+  url: text("url").notNull(),
+  addedBy: text("added_by")
+    .notNull()
+    .references(() => user.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 })
 
 export const tasks = pgTable(
@@ -298,6 +322,108 @@ export const documents = pgTable("documents", {
   projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
   taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }),
 })
+
+export const taskChatThreads = pgTable(
+  "task_chat_threads",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("task_chat_threads_task_id_unique").on(table.taskId),
+    index("task_chat_threads_created_by_idx").on(table.createdBy),
+  ]
+)
+
+export const taskChatMessages = pgTable(
+  "task_chat_messages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => taskChatThreads.id, { onDelete: "cascade" }),
+    authorId: text("author_id").references(() => user.id, { onDelete: "set null" }),
+    kind: taskChatMessageKindEnum("kind").notNull().default("user"),
+    clientRequestId: varchar("client_request_id", { length: 100 }).notNull(),
+    text: text("text"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("task_chat_messages_author_id_idx").on(table.authorId),
+    index("task_chat_messages_thread_created_at_idx").on(
+      table.threadId,
+      table.createdAt
+    ),
+    uniqueIndex("task_chat_messages_thread_client_request_id_unique").on(
+      table.threadId,
+      table.clientRequestId
+    ),
+  ]
+)
+
+export const taskChatParticipants = pgTable(
+  "task_chat_participants",
+  {
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => taskChatThreads.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    lastReadMessageId: uuid("last_read_message_id"),
+    lastReadAt: timestamp("last_read_at"),
+    joinedAt: timestamp("joined_at").defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.threadId, table.userId] }),
+    index("task_chat_participants_user_id_idx").on(table.userId),
+    index("task_chat_participants_last_read_message_id_idx").on(
+      table.lastReadMessageId
+    ),
+  ]
+)
+
+export const taskChatAttachments = pgTable(
+  "task_chat_attachments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => taskChatThreads.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id").references(() => taskChatMessages.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    uploadedBy: text("uploaded_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    storageKey: varchar("storage_key", { length: 500 }).notNull(),
+    source: taskChatAttachmentSourceEnum("source").notNull().default("manual"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("task_chat_attachments_document_id_idx").on(table.documentId),
+    index("task_chat_attachments_thread_id_idx").on(table.threadId),
+    index("task_chat_attachments_uploaded_by_idx").on(table.uploadedBy),
+    uniqueIndex("task_chat_attachments_message_document_unique").on(
+      table.messageId,
+      table.documentId
+    ),
+    uniqueIndex("task_chat_attachments_message_sort_order_unique").on(
+      table.messageId,
+      table.sortOrder
+    ),
+  ]
+)
 
 export const timeEntries = pgTable("time_entries", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -486,6 +612,9 @@ export const userRelations = relations(user, ({ many }) => ({
   createdTasks: many(tasks),
   createdActivities: many(activities),
   schedules: many(userSchedules),
+  taskChatThreads: many(taskChatThreads),
+  taskChatMessages: many(taskChatMessages),
+  taskChatParticipants: many(taskChatParticipants),
 }))
 
 export const userSchedulesRelations = relations(userSchedules, ({ one }) => ({
@@ -547,6 +676,17 @@ export const projectUrlsRelations = relations(projectUrls, ({ one }) => ({
   }),
 }))
 
+export const taskLinksRelations = relations(taskLinks, ({ one }) => ({
+  task: one(tasks, {
+    fields: [taskLinks.taskId],
+    references: [tasks.id],
+  }),
+  addedByUser: one(user, {
+    fields: [taskLinks.addedBy],
+    references: [user.id],
+  }),
+}))
+
 export const tasksRelations = relations(tasks, ({ one, many }) => ({
   project: one(projects, {
     fields: [tasks.projectId],
@@ -558,9 +698,10 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   }),
   assignments: many(taskAssignments),
   activities: many(activities),
-  comments: many(comments),
   documents: many(documents),
   timeEntries: many(timeEntries),
+  chatThreads: many(taskChatThreads),
+  links: many(taskLinks),
 }))
 
 export const taskAssignmentsRelations = relations(taskAssignments, ({ one }) => ({
@@ -592,7 +733,7 @@ export const commentsRelations = relations(comments, ({ one }) => ({
   }),
 }))
 
-export const documentsRelations = relations(documents, ({ one }) => ({
+export const documentsRelations = relations(documents, ({ one, many }) => ({
   uploader: one(user, {
     fields: [documents.uploadedBy],
     references: [user.id],
@@ -604,6 +745,63 @@ export const documentsRelations = relations(documents, ({ one }) => ({
   task: one(tasks, {
     fields: [documents.taskId],
     references: [tasks.id],
+  }),
+  chatAttachments: many(taskChatAttachments),
+}))
+
+export const taskChatThreadsRelations = relations(taskChatThreads, ({ one, many }) => ({
+  task: one(tasks, {
+    fields: [taskChatThreads.taskId],
+    references: [tasks.id],
+  }),
+  creator: one(user, {
+    fields: [taskChatThreads.createdBy],
+    references: [user.id],
+  }),
+  messages: many(taskChatMessages),
+  participants: many(taskChatParticipants),
+  attachments: many(taskChatAttachments),
+}))
+
+export const taskChatMessagesRelations = relations(taskChatMessages, ({ one, many }) => ({
+  thread: one(taskChatThreads, {
+    fields: [taskChatMessages.threadId],
+    references: [taskChatThreads.id],
+  }),
+  author: one(user, {
+    fields: [taskChatMessages.authorId],
+    references: [user.id],
+  }),
+  attachments: many(taskChatAttachments),
+}))
+
+export const taskChatParticipantsRelations = relations(taskChatParticipants, ({ one }) => ({
+  thread: one(taskChatThreads, {
+    fields: [taskChatParticipants.threadId],
+    references: [taskChatThreads.id],
+  }),
+  user: one(user, {
+    fields: [taskChatParticipants.userId],
+    references: [user.id],
+  }),
+}))
+
+export const taskChatAttachmentsRelations = relations(taskChatAttachments, ({ one }) => ({
+  thread: one(taskChatThreads, {
+    fields: [taskChatAttachments.threadId],
+    references: [taskChatThreads.id],
+  }),
+  message: one(taskChatMessages, {
+    fields: [taskChatAttachments.messageId],
+    references: [taskChatMessages.id],
+  }),
+  document: one(documents, {
+    fields: [taskChatAttachments.documentId],
+    references: [documents.id],
+  }),
+  uploader: one(user, {
+    fields: [taskChatAttachments.uploadedBy],
+    references: [user.id],
   }),
 }))
 
@@ -687,6 +885,32 @@ export const notesRelations = relations(notes, ({ one }) => ({
   }),
 }))
 
+// ── Notifications ──
+export const notificationTypeEnum = pgEnum("notification_type", [
+  "mention",
+  "task_assigned",
+  "comment",
+])
+
+export const notificationEntityTypeEnum = pgEnum("notification_entity_type", [
+  "task",
+  "message",
+])
+
+export const notifications = pgTable("notifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  type: notificationTypeEnum("type").notNull(),
+  entityType: notificationEntityTypeEnum("entity_type").notNull(),
+  entityId: uuid("entity_id").notNull(),
+  fromUserId: text("from_user_id").references(() => user.id, { onDelete: "set null" }),
+  message: text("message").notNull(),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
 // ── Messages (chat jornada + mensajes de clientes externos) ──
 export const messages = pgTable("messages", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -717,5 +941,16 @@ export const messagesRelations = relations(messages, ({ one }) => ({
   task: one(tasks, {
     fields: [messages.taskId],
     references: [tasks.id],
+  }),
+}))
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  user: one(user, {
+    fields: [notifications.userId],
+    references: [user.id],
+  }),
+  fromUser: one(user, {
+    fields: [notifications.fromUserId],
+    references: [user.id],
   }),
 }))

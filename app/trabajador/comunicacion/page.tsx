@@ -27,18 +27,12 @@ export default function TrabajadorComunicacionPage() {
             </div>
             <p className="text-base font-medium text-foreground">Jornada no iniciada</p>
             <p className="text-sm text-muted-foreground text-center max-w-xs">
-              El chat se habilita cuando iniciás tu jornada laboral en la página <strong>Mi Jornada</strong>.
+              El chat se habilita cuando iniciás tu jornada laboral.
               Los mensajes quedan vinculados a cada jornada.
             </p>
             <div className="flex flex-col sm:flex-row gap-2 pt-2">
-              <Link href="/trabajador/mi-jornada">
-                <Button className="gap-2">
-                  Ir a Mi Jornada
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
               <Link href="/trabajador/noticias">
-                <Button variant="outline" className="gap-2">
+                <Button className="gap-2">
                   Ver Novedades
                   <Newspaper className="h-4 w-4" />
                 </Button>
