@@ -1,9 +1,37 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/db"
-import { user, userSchedules } from "@/db/schema"
-import { userSchema } from "@/lib/schemas"
-import { eq, and } from "drizzle-orm"
+import { projectMembers, projectWorkers, roles, taskAssignments, user, userRoles, userSchedules } from "@/db/schema"
+import { and, eq, inArray } from "drizzle-orm"
 import { getAuthUser, requireRole } from "@/lib/api-auth"
+import { syncProjectMembershipsForUser } from "@/lib/project-membership-store"
+
+const SYSTEM_ROLE_NAMES = ["admin", "coordinador", "trabajador", "externo"] as const
+
+type LegacyRole = (typeof SYSTEM_ROLE_NAMES)[number]
+
+function isLegacyRole(value: unknown): value is LegacyRole {
+  return typeof value === "string" && SYSTEM_ROLE_NAMES.includes(value as LegacyRole)
+}
+
+async function syncLegacyUserRole(userId: string, nextRole: LegacyRole) {
+  const legacyRoles = await db
+    .select({ id: roles.id, name: roles.name })
+    .from(roles)
+    .where(inArray(roles.name, [...SYSTEM_ROLE_NAMES]))
+
+  if (legacyRoles.length === 0) return
+
+  const legacyRoleIds = legacyRoles.map((role) => role.id)
+  const targetRole = legacyRoles.find((role) => role.name === nextRole)
+
+  await db
+    .delete(userRoles)
+    .where(and(eq(userRoles.userId, userId), inArray(userRoles.roleId, legacyRoleIds)))
+
+  if (targetRole) {
+    await db.insert(userRoles).values({ userId, roleId: targetRole.id })
+  }
+}
 
 async function getUserWithSchedule(id: string) {
   const found = await db.select().from(user).where(eq(user.id, id))
@@ -74,6 +102,53 @@ export async function PATCH(
     const { id } = await params
     const body = await request.json()
     const { weeklySchedule: scheduleData, ...userData } = body
+    const [currentUser] = await db.select().from(user).where(eq(user.id, id))
+
+    if (!currentUser) {
+      return NextResponse.json(
+        { error: "Usuario no encontrado" },
+        { status: 404 }
+      )
+    }
+
+    const nextRole = isLegacyRole(userData.role) ? userData.role : currentUser.role
+    const nextActive = typeof userData.active === "boolean" ? userData.active : currentUser.active
+    let roleTransition = null
+
+    if (currentUser.role !== nextRole) {
+      if (!(currentUser.role === "trabajador" && nextRole === "coordinador")) {
+        return NextResponse.json(
+          { error: "Demo Sprint 5: solo se permite el ascenso de trabajador a coordinador" },
+          { status: 400 }
+        )
+      }
+
+      if (!nextActive) {
+        return NextResponse.json(
+          { error: "El usuario debe estar activo para ascender a coordinador" },
+          { status: 400 }
+        )
+      }
+
+      const [projectMemberships, taskAssignmentMemberships] = await Promise.all([
+        db
+          .select({ projectId: projectMembers.projectId, role: projectMembers.role })
+          .from(projectMembers)
+          .where(eq(projectMembers.userId, id)),
+        db
+          .select({ taskId: taskAssignments.taskId })
+          .from(taskAssignments)
+          .where(eq(taskAssignments.userId, id)),
+      ])
+
+      roleTransition = {
+        changed: true,
+        fromRole: currentUser.role,
+        toRole: nextRole,
+        removedProjectMemberships: projectMemberships.length,
+        removedTaskAssignments: taskAssignmentMemberships.length,
+      }
+    }
 
     // Update user fields if present
     if (Object.keys(userData).length > 0) {
@@ -88,6 +163,15 @@ export async function PATCH(
           { error: "Usuario no encontrado" },
           { status: 404 }
         )
+      }
+
+      if (roleTransition && isLegacyRole(nextRole)) {
+        await Promise.all([
+          db.delete(projectWorkers).where(eq(projectWorkers.userId, id)),
+          db.delete(taskAssignments).where(eq(taskAssignments.userId, id)),
+          syncLegacyUserRole(id, nextRole),
+        ])
+        await syncProjectMembershipsForUser(id)
       }
     }
 
@@ -116,7 +200,10 @@ export async function PATCH(
     }
 
     const result = await getUserWithSchedule(id)
-    return NextResponse.json(result)
+    return NextResponse.json({
+      ...result,
+      roleTransition,
+    })
   } catch (error) {
     console.error("Error updating user:", error)
     return NextResponse.json(

@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server"
-import { and, eq } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 
 import { db } from "@/db"
-import { projects, tasks, taskAssignments } from "@/db/schema"
+import { projects, tasks } from "@/db/schema"
 import type { ApiUser } from "@/lib/api-auth"
+import { getProjectMembership } from "@/lib/project-membership-store"
 
 export interface TaskAccessContext {
   taskId: string
   projectId: string
   coordinatorId: string
+  coordinatorIds: string[]
 }
 
 type TaskAccessSuccess = {
@@ -43,41 +45,21 @@ export async function getTaskAccessContext(
   }
 
   const taskContext = taskRows[0]
+  const membership = await getProjectMembership(taskContext.projectId, {
+    legacyCoordinatorId: taskContext.coordinatorId,
+  })
+  const contextualTaskContext = {
+    ...taskContext,
+    coordinatorId: membership.coordinatorIds[0] ?? taskContext.coordinatorId,
+    coordinatorIds: membership.coordinatorIds,
+  }
 
   if (user.role === "admin") {
-    return { context: taskContext, error: null }
+    return { context: contextualTaskContext, error: null }
   }
 
-  if (user.role === "coordinador") {
-    if (taskContext.coordinatorId === user.id) {
-      return { context: taskContext, error: null }
-    }
-
-    return {
-      context: null,
-      error: NextResponse.json({ error: "Tarea no encontrada" }, { status: 404 }),
-    }
-  }
-
-  if (user.role === "trabajador") {
-    const assignment = await db
-      .select({ taskId: taskAssignments.taskId })
-      .from(taskAssignments)
-      .where(
-        and(
-          eq(taskAssignments.taskId, taskContext.taskId),
-          eq(taskAssignments.userId, user.id)
-        )
-      )
-
-    if (assignment.length > 0) {
-      return { context: taskContext, error: null }
-    }
-
-    return {
-      context: null,
-      error: NextResponse.json({ error: "Sin permisos suficientes" }, { status: 403 }),
-    }
+  if (membership.projectMembers.some((member) => member.userId === user.id)) {
+    return { context: contextualTaskContext, error: null }
   }
 
   return {

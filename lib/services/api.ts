@@ -115,8 +115,14 @@ export const tasksApi = {
 // ══════════════════════════════════════════════
 
 export const timeEntriesApi = {
-    getAll: (params?: { userId?: string; projectId?: string; date?: string; status?: string }) => {
-        const search = new URLSearchParams(params as Record<string, string>).toString()
+    getAll: (params?: { userId?: string; projectId?: string; date?: string; status?: string; active?: boolean }) => {
+        const searchParams = new URLSearchParams()
+        if (params?.userId) searchParams.set("userId", params.userId)
+        if (params?.projectId) searchParams.set("projectId", params.projectId)
+        if (params?.date) searchParams.set("date", params.date)
+        if (params?.status) searchParams.set("status", params.status)
+        if (params?.active) searchParams.set("active", "true")
+        const search = searchParams.toString()
         return fetcher<TimeEntryEnriched[]>(`/api/time-entries${search ? `?${search}` : ""}`)
     },
     create: (data: Omit<TimeEntry, "id">) =>

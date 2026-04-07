@@ -7,6 +7,7 @@ import {
   getSessionMessageAccessContext,
   getTaskMessageAccessContext,
 } from "@/lib/message-access"
+import { getProjectMemberships } from "@/lib/project-membership-store"
 import { validateAttachments } from "@/lib/validate-attachments"
 import { eq, desc, and, sql, isNull, ne } from "drizzle-orm"
 
@@ -86,6 +87,7 @@ export async function GET(request: NextRequest) {
       const baseQuery = db
         .select({
           ...MESSAGE_SELECT,
+          coordinatorId: projects.coordinatorId,
           // For new messages: join directly on projectId/taskId.
           // For old pre-start messages (projectId = null): fall back to the
           // time_entry of the same worker on the same day.
@@ -111,12 +113,33 @@ export async function GET(request: NextRequest) {
         .leftJoin(projects, eq(messages.projectId, projects.id))
         .leftJoin(tasks, eq(messages.taskId, tasks.id))
 
-      rows = await (authUser.role === "coordinador"
-        ? baseQuery
-            .where(eq(projects.coordinatorId, authUser.id))
-            .orderBy(desc(messages.createdAt))
-            .limit(200)
-        : baseQuery.orderBy(desc(messages.createdAt)).limit(200))
+      const inboxRows = await baseQuery.orderBy(desc(messages.createdAt)).limit(200)
+
+      if (authUser.role === "coordinador") {
+        const projectIds = [...new Set(
+          inboxRows
+            .map((row) => row.projectId)
+            .filter((projectId): projectId is string => Boolean(projectId))
+        )]
+
+        const legacyCoordinators = inboxRows
+          .filter((row): row is typeof row & { projectId: string } => Boolean(row.projectId))
+          .map((row) => ({
+            projectId: row.projectId,
+            coordinatorId: row.coordinatorId,
+          }))
+
+        const membershipMap = await getProjectMemberships(projectIds, {
+          legacyCoordinators,
+        })
+
+        rows = inboxRows.filter((row) => {
+          if (!row.projectId) return false
+          return membershipMap.get(row.projectId)?.coordinatorIds.includes(authUser.id) ?? false
+        })
+      } else {
+        rows = inboxRows
+      }
     }
 
     return NextResponse.json(rows)

@@ -16,6 +16,18 @@ vi.mock("@/db", () => ({
   },
 }))
 
+vi.mock("@/lib/project-membership-store", () => ({
+  getProjectMembership: vi.fn((projectId: string) => Promise.resolve({
+    projectId,
+    coordinatorIds: ["coord-1"],
+    assignedWorkerIds: ["worker-1"],
+    projectMembers: [
+      { userId: "coord-1", role: "coordinador" },
+      { userId: "worker-1", role: "colaborador" },
+    ],
+  })),
+}))
+
 import { getTaskAccessContext } from "@/lib/task-access"
 
 const makeUser = (role: string, id = "user-1") => ({
@@ -43,28 +55,34 @@ describe("getTaskAccessContext", () => {
     const result = await getTaskAccessContext("task-1", makeUser("admin", "admin-1"))
 
     expect(result.error).toBeNull()
-    expect(result.context).toEqual(mockTaskRows[0])
+    expect(result.context).toEqual({
+      ...mockTaskRows[0],
+      coordinatorIds: ["coord-1"],
+    })
   })
 
   it("allows the owning coordinador", async () => {
     const result = await getTaskAccessContext("task-1", makeUser("coordinador", "coord-1"))
 
     expect(result.error).toBeNull()
-    expect(result.context).toEqual(mockTaskRows[0])
+    expect(result.context).toEqual({
+      ...mockTaskRows[0],
+      coordinatorIds: ["coord-1"],
+    })
   })
 
   it("conceals out-of-scope tasks from other coordinadores", async () => {
     const result = await getTaskAccessContext("task-1", makeUser("coordinador", "coord-2"))
 
     expect(result.context).toBeNull()
-    expect(result.error?.status).toBe(404)
+    expect(result.error?.status).toBe(403)
   })
 
-  it("returns 403 for trabajador", async () => {
+  it("allows project members with contextual access", async () => {
     const result = await getTaskAccessContext("task-1", makeUser("trabajador", "worker-1"))
 
-    expect(result.context).toBeNull()
-    expect(result.error?.status).toBe(403)
+    expect(result.error).toBeNull()
+    expect(result.context?.projectId).toBe("project-1")
   })
 
   it("returns 404 when the task does not exist", async () => {

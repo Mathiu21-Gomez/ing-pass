@@ -25,7 +25,18 @@
       "Bash(npm run:*)",
       "Bash(ls C:Usersmathiing-pass.env*)",
       "Bash(head:*)",
-      "Bash(grep -n \"export.*\\\\\\(GET\\\\|POST\\\\|PUT\\\\|PATCH\\\\|DELETE\\\\\\)\" /c/Users/mathi/ing-pass/app/api/tasks/[id]/route.ts)"
+      "Bash(grep -n \"export.*\\\\\\(GET\\\\|POST\\\\|PUT\\\\|PATCH\\\\|DELETE\\\\\\)\" /c/Users/mathi/ing-pass/app/api/tasks/[id]/route.ts)",
+      "Read(//c/Users/mathi/.agents/skills/ui-ux-pro-max/**)",
+      "Bash(python scripts/search.py \"operations management task tracking field workers admin dashboard SaaS\" --design-system -f markdown -p \"ing-pass\")",
+      "Bash(py --version)",
+      "Bash(where python:*)",
+      "Bash(\"C:\\\\Users\\\\mathi\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\python.exe\" scripts/search.py \"operations management task tracking field workers admin dashboard SaaS\" --design-system -f markdown -p \"ing-pass\")",
+      "Bash(winget list:*)",
+      "Bash(ls -la /c/Users/mathi/ing-pass/app/api/tasks/[id]/)",
+      "Bash(ls:*)",
+      "Bash(grep -E \"\\\\.ts$\")",
+      "Bash(grep -l \"export async function\" /c/Users/mathi/ing-pass/app/api/**/*.ts)",
+      "Bash(node:*)"
     ]
   }
 }

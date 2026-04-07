@@ -88,7 +88,8 @@ export const projectSchema = z
             .min(10, "La descripción debe tener al menos 10 caracteres")
             .max(500, "La descripción no puede exceder 500 caracteres"),
         clientId: z.string().min(1, "Selecciona un cliente"),
-        coordinatorId: z.string().min(1, "Selecciona un coordinador"),
+        coordinatorId: z.string().optional().default(""),
+        coordinatorIds: z.array(z.string()).default([]),
         stage: z.string().min(1, "La etapa es requerida"),
         startDate: z.string().min(1, "La fecha de inicio es requerida"),
         endDate: z.string().min(1, "La fecha de fin es requerida"),
@@ -98,6 +99,36 @@ export const projectSchema = z
         assignedWorkers: z
             .array(z.string())
             .min(1, "Asigna al menos un trabajador"),
+    })
+    .refine(
+        (data) => {
+            const nextCoordinatorIds = data.coordinatorIds.length > 0
+                ? data.coordinatorIds
+                : data.coordinatorId
+                    ? [data.coordinatorId]
+                    : []
+
+            return nextCoordinatorIds.length > 0
+        },
+        {
+            message: "Selecciona al menos un coordinador",
+            path: ["coordinatorIds"],
+        }
+    )
+    .transform((data) => {
+        const coordinatorIds = Array.from(new Set(
+            data.coordinatorIds.length > 0
+                ? data.coordinatorIds
+                : data.coordinatorId
+                    ? [data.coordinatorId]
+                    : []
+        ))
+
+        return {
+            ...data,
+            coordinatorIds,
+            coordinatorId: coordinatorIds[0] ?? "",
+        }
     })
     .refine(
         (data) => {

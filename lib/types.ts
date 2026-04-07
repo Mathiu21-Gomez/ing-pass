@@ -1,6 +1,10 @@
 // ── Roles ──
 export type UserRole = "admin" | "coordinador" | "trabajador" | "externo"
 
+export type ProjectMemberRole = "coordinador" | "colaborador" | "modelador" | "lider"
+
+export type TaskAssignmentRole = "primary" | "support"
+
 export type ProjectStatus = "Activo" | "Pausado" | "Finalizado"
 
 export type TimerStatus = "trabajando" | "colacion" | "pausado" | "reunion" | "finalizado" | "inactivo"
@@ -56,6 +60,33 @@ export interface DaySchedule {
 
 export const DAY_LABELS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
+export interface UserProjectReference {
+  id: string
+  name: string
+  status?: ProjectStatus
+}
+
+export interface UserProjectSummary {
+  coordinated: UserProjectReference[]
+  worker: UserProjectReference[]
+  activeTaskAssignments: number
+}
+
+export interface UserPromotionInfo {
+  canPromoteToCoordinator: boolean
+  cleanupProjectMemberships: number
+  cleanupTaskAssignments: number
+  reason: string | null
+}
+
+export interface UserRoleTransitionSummary {
+  changed: boolean
+  fromRole: UserRole
+  toRole: UserRole
+  removedProjectMemberships: number
+  removedTaskAssignments: number
+}
+
 // ── Usuario ──
 export interface User {
   id: string
@@ -69,6 +100,9 @@ export interface User {
   scheduleType: "fijo" | "libre"
   workerStatus?: WorkerStatus
   weeklySchedule: DaySchedule[]
+  projectSummary?: UserProjectSummary
+  promotion?: UserPromotionInfo
+  roleTransition?: UserRoleTransitionSummary
 }
 
 // ── Actividad ──
@@ -136,6 +170,7 @@ export interface Task {
   priority: number
   projectId: string
   assignedTo: string[]
+  supportIds?: string[]
   createdBy: string
   createdAt: string
   dueDate: string | null
@@ -152,6 +187,7 @@ export interface Project {
   description: string
   clientId: string
   coordinatorId: string
+  coordinatorIds: string[]
   stage: string
   startDate: string
   endDate: string
@@ -161,6 +197,10 @@ export interface Project {
   urls: { label: string; url: string }[]
   tasks: Task[]
   assignedWorkers: string[]
+  projectMembers?: Array<{
+    userId: string
+    role: ProjectMemberRole
+  }>
 }
 
 // ── Nota ──
@@ -209,6 +249,7 @@ export interface TimeEntry {
   progressPercentage: number
   pauseCount: number
   progressJustification: string
+  runtimeState?: unknown | null
   editable: boolean
 }
 
@@ -275,4 +316,39 @@ export interface DashboardKPIs {
   totalProjects: number
   activeProjects: number
   totalWorkers: number
+}
+
+export interface TaskOperationalHistoryEvent {
+  id: string
+  actorName: string
+  actorRole: string | null
+  attachmentCount: number
+  createdAt: string
+  detail: string | null
+  mentionCount: number
+  summary: string
+}
+
+export interface TaskWorkerCurrentTaskContext {
+  currentProjectName: string | null
+  currentTaskId: string | null
+  currentTaskName: string | null
+  entryDate: string | null
+  matchesCurrentTask: boolean
+  startTime: string | null
+  state: "active" | "idle" | "unassigned"
+  timerStatus: TimerStatus | null
+  workerId: string | null
+  workerName: string | null
+}
+
+export interface TaskOperationalHistorySummary {
+  lastActivityAt: string | null
+  recentActivity: TaskOperationalHistoryEvent[]
+  stats: {
+    attachmentCount: number
+    mentionCount: number
+    messageCount: number
+  }
+  workerContext: TaskWorkerCurrentTaskContext
 }

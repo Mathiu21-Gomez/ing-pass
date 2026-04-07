@@ -48,6 +48,7 @@ async function seed() {
   await db.delete(schema.taskAssignments)
   await db.delete(schema.tasks)
   await db.delete(schema.projectUrls)
+  await db.delete(schema.projectMembers)
   await db.delete(schema.projectWorkers)
   await db.delete(schema.projects)
   await db.delete(schema.clients)
@@ -63,7 +64,9 @@ async function seed() {
   // Better Auth uses text IDs — we generate stable ones for referencing
   const adminId = "usr_admin_001"
   const coordinadorId = "usr_coord_001"
+  const coordinadorSecundarioId = "usr_coord_002"
   const trabajadorId = "usr_trab_001"
+  const modeladorId = "usr_model_001"
   const externoId = "usr_ext_001"
 
   const usersData = [
@@ -88,12 +91,33 @@ async function seed() {
       active: true,
     },
     {
+      id: coordinadorSecundarioId,
+      name: "Sofía Herrera Díaz",
+      email: "coord2@ingpass.cl",
+      role: "coordinador",
+      position: "Coordinadora Técnica",
+      emailPersonal: "sherrera@gmail.com",
+      scheduleType: "fijo",
+      active: true,
+    },
+    {
       id: trabajadorId,
       name: "Juan Pérez González",
       email: "trabajador@ingpass.cl",
       role: "trabajador",
       position: "Ingeniero Civil",
       emailPersonal: "jperez@gmail.com",
+      scheduleType: "fijo",
+      workerStatus: "disponible",
+      active: true,
+    },
+    {
+      id: modeladorId,
+      name: "Martín Rojas Silva",
+      email: "modelador@ingpass.cl",
+      role: "trabajador",
+      position: "Modelador BIM",
+      emailPersonal: "mrojas@gmail.com",
       scheduleType: "fijo",
       workerStatus: "disponible",
       active: true,
@@ -140,8 +164,10 @@ async function seed() {
   await db.insert(schema.userSchedules).values([
     ...makeSchedule(adminId, { start: "08:00", end: "17:00" }),
     ...makeSchedule(coordinadorId, { start: "08:00", end: "17:00" }),
+    ...makeSchedule(coordinadorSecundarioId, { start: "08:00", end: "17:00" }),
     // Trabajador: Lun-Jue 08:00-17:30, Vie 08:00-16:00
     ...makeSchedule(trabajadorId, { start: "08:00", end: "17:30" }, { start: "08:00", end: "16:00" }),
+    ...makeSchedule(modeladorId, { start: "08:00", end: "17:00" }),
     ...makeSchedule(externoId, { start: "08:00", end: "17:00" }),
   ])
 
@@ -203,6 +229,14 @@ async function seed() {
   await db.insert(schema.projectWorkers).values([
     { projectId, userId: trabajadorId },
     { projectId, userId: coordinadorId },
+    { projectId, userId: modeladorId },
+  ])
+
+  await db.insert(schema.projectMembers).values([
+    { projectId, userId: coordinadorId, role: "coordinador" },
+    { projectId, userId: coordinadorSecundarioId, role: "coordinador" },
+    { projectId, userId: trabajadorId, role: "colaborador" },
+    { projectId, userId: modeladorId, role: "modelador" },
   ])
 
   // Project URLs
@@ -437,7 +471,9 @@ async function seed() {
   console.log("  ─────────────────────────────────────────")
   console.log("  Admin:       admin@ingpass.cl")
   console.log("  Coordinador: coordinador@ingpass.cl")
+  console.log("  Coordinador 2: coord2@ingpass.cl")
   console.log("  Trabajador:  trabajador@ingpass.cl")
+  console.log("  Modelador:   modelador@ingpass.cl")
   console.log("  Externo:     externo@ingpass.cl")
   console.log("")
 }

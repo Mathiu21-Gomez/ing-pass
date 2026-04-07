@@ -23,9 +23,9 @@ export default function LoginPage() {
     if (isAuthenticated && user) {
       const target =
         user.role === "admin"
-          ? "/admin/home"
+          ? "/admin/dashboard"
           : user.role === "coordinador"
-            ? "/coordinador/home"
+            ? "/coordinador/dashboard"
             : user.role === "externo"
               ? "/externo/proyectos"
               : "/trabajador/home"

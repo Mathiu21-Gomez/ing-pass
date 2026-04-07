@@ -1,13 +1,22 @@
 "use client"
 
-import { useState, useCallback, useEffect, useRef, Suspense } from "react"
+import { useState, useEffect, useRef, Suspense, useMemo } from "react"
 import { useSearchParams } from "next/navigation"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { ExportDialog } from "@/components/export-dialog"
 import type { Task, TaskStatus, Project, User, Tag, Activity } from "@/lib/types"
 import { ChatPanel } from "@/components/chat-panel"
+import { TaskOperationalHistory } from "@/components/task-operational-history"
 import { SharedLinksPanel } from "@/components/shared-links-panel"
-import { Badge } from "@/components/ui/badge"
+import {
+  TaskShellBoard,
+  TaskShellDetailGrid,
+  TaskShellHeader,
+  TaskShellMetaGrid,
+  TaskShellMetaItem,
+  TaskShellPanel,
+  TaskShellStatCard,
+} from "@/components/task-shell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -22,6 +31,19 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import {
+  AlertDialog as ConfirmDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -29,23 +51,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import {
   Plus,
   Search,
   ChevronDown,
   ChevronRight,
-  MessageSquare,
   CheckCircle2,
   Circle,
   Bell,
@@ -57,9 +66,38 @@ import {
   CheckCheck,
   Loader2,
   Download,
+  ListTodo,
+  CalendarDays,
+  FileText,
+  FolderKanban,
+  Users,
+  Trash2,
+  UserCheck,
+  UserPlus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import {
+  DEFAULT_TASK_SORT_DIRECTION,
+  DEFAULT_TASK_SORT_KEY,
+  DEFAULT_TASK_VIEW,
+  DEFAULT_GROUP_BY,
+  filterTasksByView,
+  getStatusesForView,
+  getTaskViewForStatus,
+  groupTasksByStatus,
+  groupTasksBy,
+  sortTasks,
+  TASK_SORT_LABELS,
+  TASK_VIEW_LABELS,
+  GROUP_BY_LABELS,
+  type TaskSortDirection,
+  type TaskSortKey,
+  type TaskView,
+  type GroupByKey,
+} from "@/lib/task-board"
+import { formatCorrelativeId, isTaskOverdue } from "@/lib/task-display"
 import { toast } from "sonner"
+import { isProjectCoordinator } from "@/lib/project-membership"
 
 // ─── Status Config ─────────────────────────────────────────────
 const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; icon: React.ReactNode; order: number }> = {
@@ -75,6 +113,18 @@ const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; icon: Re
 const STATUS_ORDER = (Object.keys(STATUS_CONFIG) as TaskStatus[]).sort(
   (a, b) => STATUS_CONFIG[a].order - STATUS_CONFIG[b].order
 )
+
+const COORDINATOR_STORAGE_KEY = "task-board:coordinador"
+
+const STATUS_LEFT_BORDER: Record<TaskStatus, string> = {
+  en_curso: "border-l-blue-500",
+  pendiente: "border-l-slate-400",
+  retrasado: "border-l-red-500",
+  bloqueado: "border-l-orange-500",
+  esperando_info: "border-l-yellow-500",
+  listo_para_revision: "border-l-violet-500",
+  finalizado: "border-l-emerald-500",
+}
 
 const TAG_PRESET_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#3b82f6","#ef4444","#8b5cf6","#14b8a6","#f97316","#64748b"]
 
@@ -156,25 +206,22 @@ function AlertDialog({
   )
 }
 
-// ─── Task Detail Panel (inline expandible) ────────────────────
-type CoordinatorTaskTab = "detalles" | "checklist" | "enlaces" | "comentarios"
-
 function TaskDetailPanel({
   task,
   allUsers,
   availableTags,
   isOpen,
-  defaultTab = "detalles",
   onUpdate,
   onTagsUpdate,
+  onDelete,
 }: {
   task: Task & { _projectName: string; _projectId: string }
   allUsers: User[]
   availableTags: Tag[]
   isOpen: boolean
-  defaultTab?: CoordinatorTaskTab
   onUpdate: (taskId: string, updates: Partial<Task>) => void
   onTagsUpdate: (taskId: string, tags: Tag[]) => void
+  onDelete: (taskId: string) => void
 }) {
   const { user } = useAuth()
   const [showAlertForm, setShowAlertForm] = useState(false)
@@ -187,8 +234,36 @@ function TaskDetailPanel({
   const [activities, setActivities] = useState<Activity[]>(task.activities)
   const [newCheckItem, setNewCheckItem] = useState("")
   const [addingCheckItem, setAddingCheckItem] = useState(false)
-  const [activeTab, setActiveTab] = useState<CoordinatorTaskTab>(defaultTab)
   const [mentionableUsers, setMentionableUsers] = useState<{ id: string; name: string }[]>([])
+  const [supportIds, setSupportIds] = useState<string[]>(task.supportIds ?? [])
+  const [supportPopoverOpen, setSupportPopoverOpen] = useState(false)
+
+  useEffect(() => {
+    setSupportIds(task.supportIds ?? [])
+  }, [task.id, task.supportIds])
+
+  async function handleSupportToggle(userId: string) {
+    const next = supportIds.includes(userId)
+      ? supportIds.filter((id) => id !== userId)
+      : [...supportIds, userId]
+    setSupportIds(next)
+    setSupportPopoverOpen(false)
+    try {
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ supportIds: next }),
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        onUpdate(task.id, { supportIds: updated.supportIds ?? next })
+      } else {
+        setSupportIds(task.supportIds ?? [])
+      }
+    } catch {
+      setSupportIds(task.supportIds ?? [])
+    }
+  }
 
   useEffect(() => {
     if (!isOpen) return
@@ -200,10 +275,11 @@ function TaskDetailPanel({
   }, [isOpen, task.id])
 
   useEffect(() => {
-    if (isOpen) {
-      setActiveTab(defaultTab)
-    }
-  }, [defaultTab, isOpen, task.id])
+    setDescValue(task.description)
+    setGuidelinesValue(task.guidelines ?? "")
+    setTaskTags(task.tags ?? [])
+    setActivities(task.activities)
+  }, [task.activities, task.description, task.guidelines, task.id, task.tags])
 
   async function handleStatusChange(newStatus: TaskStatus) {
     try {
@@ -307,22 +383,19 @@ function TaskDetailPanel({
       )}
     >
       <div className="overflow-hidden min-h-0">
-        <div className="border-t border-l-4 border-l-primary/30 bg-primary/[0.02]">
-
-          {/* ── Header del panel ── */}
-          <div className="px-5 py-2.5 bg-muted/30 border-b flex items-center gap-3 flex-wrap">
-            <span className="text-[10px] font-mono font-semibold text-muted-foreground">#{task.correlativeId}</span>
-            <span className="text-[10px] text-muted-foreground/50">·</span>
-            <span className="text-[10px] text-muted-foreground">{task._projectName}</span>
-            <div className="ml-auto flex items-center gap-3 flex-wrap">
+        <div className={cn("rounded-b-2xl border-t border-l-4 bg-primary/[0.02] px-4 py-4", STATUS_LEFT_BORDER[task.status])}>
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-border/60 bg-background/80 px-4 py-3">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground/70">{formatCorrelativeId(task._projectName, task.correlativeId)}</span>
+            <span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground">{task._projectName}</span>
+            <div className="ml-auto flex items-center gap-2">
               <Select value={task.status} onValueChange={(v) => handleStatusChange(v as TaskStatus)}>
-                <SelectTrigger className={cn("w-auto h-7 text-xs border px-2.5 gap-1.5", STATUS_CONFIG[task.status].color)}>
+                <SelectTrigger className={cn("h-8 w-auto gap-1.5 border px-2.5 text-xs", STATUS_CONFIG[task.status].color)}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {STATUS_ORDER.map((s) => (
                     <SelectItem key={s} value={s} className="text-xs">
-                      <span className={cn("px-2 py-0.5 rounded-full text-[10px]", STATUS_CONFIG[s].color)}>
+                      <span className={cn("rounded-full px-2 py-0.5 text-[10px]", STATUS_CONFIG[s].color)}>
                         {STATUS_CONFIG[s].label}
                       </span>
                     </SelectItem>
@@ -330,215 +403,411 @@ function TaskDetailPanel({
                 </SelectContent>
               </Select>
               {activities.length > 0 && (
-                <div className="flex items-center gap-2 ml-1">
-                  <Progress value={progress} className="h-1.5 w-20" />
-                  <span className={cn("text-xs font-semibold tabular-nums", progress === 100 ? "text-emerald-500" : "text-primary")}>
-                    {progress}%
-                  </span>
+                <div className="flex items-center gap-2 rounded-full border border-border/60 bg-muted/35 px-3 py-1">
+                  <div className="w-20">
+                    <Progress value={progress} className="h-1.5" />
+                  </div>
+                  <span className="text-[11px] font-semibold text-foreground">{progress}%</span>
                 </div>
               )}
               <div className="flex -space-x-1">
                 {assignedUsers.slice(0, 4).map((u) => (
-                  <div key={u.id} title={u.name} className="h-6 w-6 rounded-full bg-primary/10 border-2 border-background flex items-center justify-center text-[9px] font-bold text-primary">
+                  <div key={u.id} title={u.name} className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-background bg-primary/10 text-[9px] font-bold text-primary">
                     {u.name.charAt(0)}
                   </div>
                 ))}
-                {assignedUsers.length === 0 && <span className="text-xs text-muted-foreground/50 italic">Sin asignar</span>}
+                {assignedUsers.length === 0 ? <span className="text-xs italic text-muted-foreground/50">Sin asignar</span> : null}
               </div>
             </div>
           </div>
-
-          {/* ── Tabs ── */}
-          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as CoordinatorTaskTab)} className="flex flex-col">
-            <TabsList className="w-full rounded-none border-b h-10 bg-transparent px-5 justify-start gap-1 shrink-0">
-              <TabsTrigger value="detalles" className="text-xs h-8 px-3 data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none">
-                Detalles
-              </TabsTrigger>
-              <TabsTrigger value="checklist" className="text-xs h-8 px-3 data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none">
-                Checklist {activities.length > 0 && <span className="ml-1 text-[10px] text-muted-foreground">({completedCount}/{activities.length})</span>}
-              </TabsTrigger>
-              <TabsTrigger value="enlaces" className="text-xs h-8 px-3 data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none">
-                Enlaces
-              </TabsTrigger>
-              <TabsTrigger value="comentarios" className="text-xs h-8 px-3 data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none">
-                Comentarios
-              </TabsTrigger>
-            </TabsList>
-
-            {/* Tab: Detalles */}
-            <TabsContent value="detalles" className="mt-0 px-5 py-4 space-y-5">
-
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs text-muted-foreground">Descripción</Label>
-                  <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={() => setEditingDescription(!editingDescription)}>
-                    <Pencil className="h-3 w-3" />
-                  </Button>
-                </div>
-                {editingDescription ? (
-                  <div className="space-y-2">
-                    <Textarea value={descValue} onChange={(e) => setDescValue(e.target.value)} rows={4} className="text-sm" />
-                    <div className="flex gap-2 justify-end">
-                      <Button variant="outline" size="sm" onClick={() => setEditingDescription(false)}>Cancelar</Button>
-                      <Button size="sm" onClick={handleSaveDescription}>Guardar</Button>
-                    </div>
+          <TaskShellDetailGrid
+            info={
+              <TaskShellPanel
+                title="Información de tarea"
+                description="Contexto, responsables, documentos, pautas y fecha comprometida para coordinar la ejecución."
+                actions={!showAlertForm ? (
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" className="gap-2 text-xs" onClick={() => setShowAlertForm(true)}>
+                      <Bell className="h-3.5 w-3.5" /> Configurar alarma
+                    </Button>
+                    <ConfirmDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="outline" size="sm" className="gap-2 text-xs text-destructive hover:text-destructive hover:border-destructive/50">
+                          <Trash2 className="h-3.5 w-3.5" /> Eliminar
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Eliminar tarea</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Vas a eliminar permanentemente <strong>{formatCorrelativeId(task._projectName, task.correlativeId)} — {task.name}</strong>.
+                            Se perderán todos los comentarios, actividades y documentos asociados.
+                            Esta acción no se puede deshacer.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            onClick={() => onDelete(task.id)}
+                          >
+                            Eliminar tarea
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </ConfirmDialog>
                   </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
-                    {task.description || <span className="italic opacity-40">Sin descripción</span>}
-                  </p>
-                )}
-              </div>
+                ) : null}
+              >
+                <div className="space-y-5">
+                  {showAlertForm ? <AlertDialog taskId={task.id} onClose={() => setShowAlertForm(false)} /> : null}
 
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs text-muted-foreground">Pautas de seguimiento</Label>
-                  <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={() => setEditingGuidelines(!editingGuidelines)}>
-                    <Pencil className="h-3 w-3" />
-                  </Button>
-                </div>
-                {editingGuidelines ? (
-                  <div className="space-y-2">
-                    <Textarea value={guidelinesValue} onChange={(e) => setGuidelinesValue(e.target.value)} rows={3} className="text-sm" placeholder="Instrucciones de seguimiento..." />
-                    <div className="flex gap-2 justify-end">
-                      <Button variant="outline" size="sm" onClick={() => setEditingGuidelines(false)}>Cancelar</Button>
-                      <Button size="sm" onClick={handleSaveGuidelines}>Guardar</Button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
-                    {task.guidelines || <span className="italic opacity-40">Sin pautas</span>}
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs text-muted-foreground">Etiquetas</Label>
-                  <Button variant="ghost" size="sm" className="h-6 text-xs px-2" onClick={() => setShowTagSelector(!showTagSelector)}>
-                    <TagIcon className="h-3 w-3 mr-1" /> Gestionar
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {taskTags.length === 0 && <span className="text-xs text-muted-foreground/40 italic">Sin etiquetas</span>}
-                  {taskTags.map((tag) => <TagBadge key={tag.id} tag={tag} onRemove={() => handleTagToggle(tag)} />)}
-                </div>
-                {showTagSelector && (
-                  <div className="rounded-lg border p-2 flex flex-wrap gap-1.5 bg-muted/20">
-                    {availableTags.map((tag) => {
-                      const selected = taskTags.some((t) => t.id === tag.id)
-                      return (
-                        <button key={tag.id} onClick={() => handleTagToggle(tag)}
-                          className={cn("rounded-full px-2.5 py-1 text-[10px] font-medium text-white transition-opacity", !selected && "opacity-35")}
-                          style={{ backgroundColor: tag.color }}>
-                          {tag.name}
-                        </button>
-                      )
-                    })}
-                    {availableTags.length === 0 && <span className="text-xs text-muted-foreground">Sin etiquetas para este proyecto</span>}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Personal asignado</Label>
-                <div className="flex flex-wrap gap-2">
-                  {assignedUsers.map((u) => (
-                    <div key={u.id} className="flex items-center gap-1.5 rounded-full bg-primary/5 border border-primary/10 px-2.5 py-1 text-xs">
-                      <div className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center text-[9px] font-bold text-primary">
-                        {u.name.charAt(0)}
+                  <TaskShellMetaGrid>
+                    <TaskShellMetaItem icon={FolderKanban} label="Proyecto" value={task._projectName} />
+                    <TaskShellMetaItem icon={CalendarDays} label="Inicio" value={new Date(task.createdAt).toLocaleDateString("es-CL", { day: "numeric", month: "short", year: "numeric" })} />
+                    <TaskShellMetaItem icon={CalendarDays} label="Entrega" value={task.dueDate ? new Date(task.dueDate).toLocaleDateString("es-CL", { day: "numeric", month: "short", year: "numeric" }) : "Sin fecha comprometida"} />
+                    <TaskShellMetaItem
+                      icon={UserCheck}
+                      label="Responsable"
+                      value={assignedUsers.length > 0 ? assignedUsers.map((u) => u.name.split(" ").slice(0, 2).join(" ")).join(", ") : "Sin responsable"}
+                      className="sm:col-span-2"
+                    />
+                    <div className="sm:col-span-2 rounded-2xl border border-border/60 bg-muted/25 px-4 py-3">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/60">
+                          <UserPlus className="h-3.5 w-3.5" />
+                          Equipo de apoyo
+                        </div>
+                        <Popover open={supportPopoverOpen} onOpenChange={setSupportPopoverOpen}>
+                          <PopoverTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px] gap-1 text-muted-foreground hover:text-foreground">
+                              <Plus className="h-3 w-3" /> Agregar
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-56 p-0" align="end">
+                            <Command>
+                              <CommandInput placeholder="Buscar trabajador..." className="h-9" />
+                              <CommandList>
+                                <CommandEmpty>Sin resultados</CommandEmpty>
+                                <CommandGroup>
+                                  {allUsers
+                                    .filter((u) => u.role === "trabajador" && u.active && !task.assignedTo.includes(u.id))
+                                    .map((u) => (
+                                      <CommandItem
+                                        key={u.id}
+                                        value={u.name}
+                                        onSelect={() => { void handleSupportToggle(u.id) }}
+                                        className="gap-2"
+                                      >
+                                        <div className={cn("h-2 w-2 rounded-full border", supportIds.includes(u.id) ? "bg-primary border-primary" : "border-muted-foreground/40")} />
+                                        <span className="text-sm">{u.name}</span>
+                                        {u.position ? <span className="ml-auto text-[10px] text-muted-foreground truncate max-w-[80px]">{u.position}</span> : null}
+                                      </CommandItem>
+                                    ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
                       </div>
-                      {u.name.split(" ")[0]}
+                      <div className="flex flex-wrap gap-1.5 min-h-[28px] items-center">
+                        {supportIds.length === 0 ? (
+                          <span className="text-sm italic text-muted-foreground/50">Sin trabajadores de apoyo</span>
+                        ) : (
+                          supportIds.map((uid) => {
+                            const u = allUsers.find((u) => u.id === uid)
+                            if (!u) return null
+                            return (
+                              <span key={uid} className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2.5 py-1 text-xs font-medium">
+                                {u.name.split(" ").slice(0, 2).join(" ")}
+                                <button
+                                  type="button"
+                                  onClick={() => { void handleSupportToggle(uid) }}
+                                  className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:text-destructive transition-colors"
+                                >
+                                  <X className="h-2.5 w-2.5" />
+                                </button>
+                              </span>
+                            )
+                          })
+                        )}
+                      </div>
                     </div>
-                  ))}
-                  {assignedUsers.length === 0 && <span className="text-xs text-muted-foreground/40 italic">Sin asignar</span>}
-                </div>
-              </div>
+                  </TaskShellMetaGrid>
 
-              <div>
-                {!showAlertForm ? (
-                  <Button variant="outline" size="sm" className="gap-2 text-xs" onClick={() => setShowAlertForm(true)}>
-                    <Bell className="h-3.5 w-3.5" /> Configurar alarma
-                  </Button>
-                ) : (
-                  <AlertDialog taskId={task.id} onClose={() => setShowAlertForm(false)} />
-                )}
-              </div>
-            </TabsContent>
-
-            {/* Tab: Checklist */}
-            <TabsContent value="checklist" className="mt-0 px-5 py-4">
-              {activities.length > 0 && (
-                <div className="flex items-center gap-3 mb-4 p-3 rounded-lg bg-muted/30">
-                  <Progress value={progress} className="h-2 flex-1" />
-                  <span className={cn("text-sm font-bold tabular-nums shrink-0", progress === 100 ? "text-emerald-500" : "text-primary")}>
-                    {progress}%
-                  </span>
-                  <span className="text-xs text-muted-foreground shrink-0">{completedCount}/{activities.length} pasos</span>
-                </div>
-              )}
-              <div className="space-y-1 mb-4">
-                {activities.map((a) => (
-                  <div key={a.id}
-                    className={cn("flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors cursor-pointer",
-                      a.completed ? "bg-emerald-500/8" : "hover:bg-muted/40"
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">Descripción</p>
+                      <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setEditingDescription((value) => !value)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                    {editingDescription ? (
+                      <div className="space-y-2 rounded-2xl border border-border/60 bg-muted/25 p-3">
+                        <Textarea value={descValue} onChange={(e) => setDescValue(e.target.value)} rows={4} className="text-sm" />
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" size="sm" onClick={() => { setDescValue(task.description); setEditingDescription(false) }}>Cancelar</Button>
+                          <Button size="sm" onClick={handleSaveDescription}>Guardar</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-border/60 bg-muted/25 px-4 py-3 text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+                        {task.description || <span className="italic text-muted-foreground">Sin descripción</span>}
+                      </div>
                     )}
-                    onClick={() => handleToggleActivity(a.id, !a.completed)}
-                  >
-                    {a.completed
-                      ? <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
-                      : <Circle className="h-5 w-5 text-muted-foreground/40 shrink-0" />
-                    }
-                    <span className={cn("text-sm flex-1 leading-snug", a.completed && "line-through text-muted-foreground/50")}>
-                      {a.name}
-                    </span>
                   </div>
-                ))}
-                {activities.length === 0 && (
-                  <p className="text-sm text-muted-foreground/40 italic text-center py-8">Sin pasos definidos</p>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <Input value={newCheckItem} onChange={(e) => setNewCheckItem(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleAddCheckItem()}
-                  placeholder="Agregar paso..." className="h-9"
-                  disabled={addingCheckItem} />
-                <Button variant="outline" size="sm" className="h-9 px-3" onClick={handleAddCheckItem}
-                  disabled={!newCheckItem.trim() || addingCheckItem}>
-                  {addingCheckItem ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                </Button>
-              </div>
-            </TabsContent>
 
-            {/* Tab: Enlaces */}
-            <TabsContent value="enlaces" className="mt-0">
-              {isOpen && (
-                <div className="px-5 py-4">
-                  <SharedLinksPanel apiBase={`/api/tasks/${task.id}`} />
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">Pautas</p>
+                      <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setEditingGuidelines((value) => !value)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                    {editingGuidelines ? (
+                      <div className="space-y-2 rounded-2xl border border-border/60 bg-muted/25 p-3">
+                        <Textarea value={guidelinesValue} onChange={(e) => setGuidelinesValue(e.target.value)} rows={3} className="text-sm" placeholder="Instrucciones de seguimiento..." />
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" size="sm" onClick={() => { setGuidelinesValue(task.guidelines ?? ""); setEditingGuidelines(false) }}>Cancelar</Button>
+                          <Button size="sm" onClick={handleSaveGuidelines}>Guardar</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-border/60 bg-muted/25 px-4 py-3 text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+                        {task.guidelines || <span className="italic text-muted-foreground">Sin pautas</span>}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">Etiquetas</p>
+                      <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => setShowTagSelector((value) => !value)}>
+                        <TagIcon className="h-3 w-3" /> Gestionar
+                      </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {taskTags.length === 0 ? <span className="text-xs italic text-muted-foreground/50">Sin etiquetas</span> : null}
+                      {taskTags.map((tag) => <TagBadge key={tag.id} tag={tag} onRemove={() => handleTagToggle(tag)} />)}
+                    </div>
+                    {showTagSelector ? (
+                      <div className="flex flex-wrap gap-1.5 rounded-2xl border border-border/60 bg-muted/25 p-3">
+                        {availableTags.map((tag) => {
+                          const selected = taskTags.some((taskTag) => taskTag.id === tag.id)
+                          return (
+                            <button
+                              key={tag.id}
+                              type="button"
+                              onClick={() => handleTagToggle(tag)}
+                              className={cn("rounded-full px-2.5 py-1 text-[10px] font-medium text-white transition-opacity", !selected && "opacity-35")}
+                              style={{ backgroundColor: tag.color }}
+                            >
+                              {tag.name}
+                            </button>
+                          )
+                        })}
+                        {availableTags.length === 0 ? <span className="text-xs text-muted-foreground">Sin etiquetas para este proyecto</span> : null}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-3 border-t border-border/60 pt-4">
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">Documentos</p>
+                      {task.documents.length > 0 ? (
+                        <div className="space-y-2">
+                          {task.documents.map((document) => (
+                            <div key={document.id} className="flex items-center gap-2 rounded-2xl border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
+                              <FileText className="h-4 w-4 text-muted-foreground" />
+                              {document.name}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-border/70 bg-muted/15 px-4 py-3 text-sm text-muted-foreground">Sin documentos adjuntos en la tarea.</div>
+                      )}
+                    </div>
+                    <SharedLinksPanel apiBase={`/api/tasks/${task.id}`} />
+                  </div>
                 </div>
-              )}
-            </TabsContent>
-
-            {/* Tab: Comentarios */}
-            <TabsContent value="comentarios" className="mt-0">
-              {isOpen && (
-                <div className="px-5 py-4">
-                  <ChatPanel
-                    taskId={task.id}
-                    useTaskChat={true}
-                    mentionableUsers={mentionableUsers}
-                    title="Chat de tarea"
-                    placeholder="Escribí un mensaje... (@ para mencionar)"
-                    allowImages={true}
-                    className="mt-2"
-                  />
+              </TaskShellPanel>
+            }
+            checklist={
+              <TaskShellPanel
+                title="Lista de control"
+                description={activities.length > 0 ? `${completedCount}/${activities.length} pasos completados.` : "Todavia no hay pasos definidos para esta tarea."}
+                actions={activities.length > 0 ? <span className={cn("text-xs font-semibold", progress === 100 ? "text-emerald-500" : "text-primary")}>{progress}%</span> : null}
+              >
+                <div className="space-y-4">
+                  {activities.length > 0 ? <Progress value={progress} className="h-2" /> : null}
+                  <div className="space-y-1">
+                    {activities.map((activity) => (
+                      <div key={activity.id} className={cn("flex items-center gap-2.5 rounded-2xl px-3 py-2.5 transition-colors", activity.completed ? "bg-emerald-500/5" : "bg-muted/25 hover:bg-muted/40")}>
+                        <button type="button" onClick={() => handleToggleActivity(activity.id, !activity.completed)} className="mt-px shrink-0">
+                          {activity.completed ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Circle className="h-4 w-4 text-muted-foreground/40" />}
+                        </button>
+                        <span className={cn("flex-1 text-sm leading-snug", activity.completed && "line-through text-muted-foreground/50")}>{activity.name}</span>
+                      </div>
+                    ))}
+                    {activities.length === 0 ? <div className="rounded-2xl border border-dashed border-border/70 bg-muted/15 px-4 py-4 text-sm text-muted-foreground">Sin pasos definidos.</div> : null}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input value={newCheckItem} onChange={(e) => setNewCheckItem(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddCheckItem()} placeholder="Agregar paso..." className="h-9 text-sm" disabled={addingCheckItem} />
+                    <Button variant="outline" size="sm" className="h-9 px-3" onClick={handleAddCheckItem} disabled={!newCheckItem.trim() || addingCheckItem}>
+                      {addingCheckItem ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
                 </div>
-              )}
-            </TabsContent>
-          </Tabs>
-
+              </TaskShellPanel>
+            }
+            history={
+              <TaskShellPanel
+                title="Historial operativo"
+                description="Rastro resumido de adjuntos, menciones, actividad reciente y foco actual del responsable."
+              >
+                <TaskOperationalHistory taskId={task.id} />
+              </TaskShellPanel>
+            }
+            conversation={
+              <TaskShellPanel title="Conversación" description="Chat de tarea, menciones y seguimiento operativo ligado al contexto actual.">
+                <ChatPanel
+                  taskId={task.id}
+                  useTaskChat={true}
+                  mentionableUsers={mentionableUsers}
+                  title="Chat de tarea"
+                  placeholder="Escribi un mensaje... (@ para mencionar)"
+                  allowImages={true}
+                  className="rounded-xl border-0"
+                />
+              </TaskShellPanel>
+            }
+          />
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── Generic Group ─────────────────────────────────────────────
+function GenericGroup({
+  groupKey,
+  label,
+  tasks,
+  allUsers,
+  availableTags,
+  expandedTaskId,
+  onToggleTask,
+  onUpdate,
+  onTagsUpdate,
+  onDeleteTask,
+}: {
+  groupKey: string
+  label: string
+  tasks: (Task & { _projectName: string; _projectId: string })[]
+  allUsers: User[]
+  availableTags: Tag[]
+  expandedTaskId: string | null
+  onToggleTask: (id: string) => void
+  onUpdate: (taskId: string, updates: Partial<Task>) => void
+  onTagsUpdate: (taskId: string, tags: Tag[]) => void
+  onDeleteTask: (taskId: string) => void
+}) {
+  const [expanded, setExpanded] = useState(true)
+  if (tasks.length === 0) return null
+
+  return (
+    <div className="rounded-xl border border-border/70 bg-card overflow-hidden shadow-sm">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors"
+      >
+        {expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+        <span className="text-sm font-medium text-foreground truncate">{label}</span>
+        <span className="text-xs text-muted-foreground ml-auto tabular-nums shrink-0">{tasks.length} tarea{tasks.length !== 1 ? "s" : ""}</span>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border/60 divide-y divide-border/40">
+          {tasks.map((task) => {
+            const isExpanded = expandedTaskId === task.id
+            const assignedUsers = allUsers.filter((u) => task.assignedTo.includes(u.id))
+            const completedActs = task.activities.filter((a) => a.completed).length
+            const progress = task.activities.length > 0
+              ? Math.round((completedActs / task.activities.length) * 100)
+              : 0
+            const overdue = isTaskOverdue(task)
+
+            return (
+              <div key={task.id}>
+                <div
+                  className={cn(
+                    "flex items-center gap-3 pl-3 pr-4 py-3 cursor-pointer transition-all border-l-4",
+                    STATUS_LEFT_BORDER[task.status],
+                    isExpanded ? "bg-primary/[0.04]" : "hover:bg-muted/30"
+                  )}
+                  onClick={() => onToggleTask(task.id)}
+                >
+                  <span className="text-[10px] font-mono font-semibold shrink-0 bg-muted/60 text-muted-foreground px-1.5 py-0.5 rounded-md">
+                    {formatCorrelativeId(task._projectName, task.correlativeId)}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={cn("text-sm font-medium truncate", task.status === "finalizado" && "line-through text-muted-foreground")}>
+                        {task.name}
+                      </span>
+                      {overdue && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-500 shrink-0">
+                          <Clock className="h-3 w-3" /> vencida
+                        </span>
+                      )}
+                      {task.tags?.slice(0, 2).map((tag) => <TagBadge key={tag.id} tag={tag} />)}
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
+                      <span className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium border", STATUS_CONFIG[task.status].color)}>
+                        {STATUS_CONFIG[task.status].label}
+                      </span>
+                      <span>·</span>
+                      <span>{task._projectName}</span>
+                      {task.dueDate && (
+                        <>
+                          <span>·</span>
+                          <span className={cn(overdue && "text-red-500 font-medium")}>
+                            {new Date(task.dueDate).toLocaleDateString("es-CL", { day: "numeric", month: "short" })}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {task.activities.length > 0 && (
+                    <div className="w-12 shrink-0">
+                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div className={cn("h-full rounded-full transition-all", progress === 100 ? "bg-emerald-500" : "bg-primary")} style={{ width: `${progress}%` }} />
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex -space-x-1.5 shrink-0">
+                    {assignedUsers.slice(0, 3).map((u) => (
+                      <div key={u.id} title={u.name} className="h-6 w-6 rounded-full bg-primary/10 border-2 border-background flex items-center justify-center text-[9px] font-bold text-primary">
+                        {u.name.charAt(0)}
+                      </div>
+                    ))}
+                  </div>
+                  <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform duration-200", isExpanded ? "rotate-180 text-primary" : "text-muted-foreground")} />
+                </div>
+                <TaskDetailPanel
+                  isOpen={isExpanded}
+                  task={task}
+                  allUsers={allUsers}
+                  availableTags={availableTags.filter((t) => t.projectId === null || t.projectId === task._projectId)}
+                  onUpdate={onUpdate}
+                  onTagsUpdate={onTagsUpdate}
+                  onDelete={onDeleteTask}
+                />
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -550,28 +819,26 @@ function StatusGroup({
   allUsers,
   availableTags,
   expandedTaskId,
-  defaultOpenTaskId,
-  defaultTab,
   onToggleTask,
   onUpdate,
   onTagsUpdate,
+  onDeleteTask,
 }: {
   status: TaskStatus
   tasks: (Task & { _projectName: string; _projectId: string })[]
   allUsers: User[]
   availableTags: Tag[]
   expandedTaskId: string | null
-  defaultOpenTaskId: string | null
-  defaultTab: CoordinatorTaskTab
   onToggleTask: (id: string) => void
   onUpdate: (taskId: string, updates: Partial<Task>) => void
   onTagsUpdate: (taskId: string, tags: Tag[]) => void
+  onDeleteTask: (taskId: string) => void
 }) {
   const [expanded, setExpanded] = useState(true)
   const cfg = STATUS_CONFIG[status]
 
   return (
-    <div className="rounded-lg border bg-card overflow-hidden">
+    <div className={cn("rounded-xl border-l-4 border border-border/70 bg-card overflow-hidden shadow-sm", STATUS_LEFT_BORDER[status])}>
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors"
@@ -581,11 +848,11 @@ function StatusGroup({
           {cfg.icon}
           {cfg.label}
         </span>
-        <span className="text-xs text-muted-foreground ml-auto">{tasks.length}</span>
+        <span className="text-xs text-muted-foreground ml-auto tabular-nums">{tasks.length} tarea{tasks.length !== 1 ? "s" : ""}</span>
       </button>
 
       {expanded && tasks.length > 0 && (
-        <div className="border-t divide-y">
+        <div className="border-t border-border/60 divide-y divide-border/40">
           {tasks.map((task) => {
             const isExpanded = expandedTaskId === task.id
             const assignedUsers = allUsers.filter((u) => task.assignedTo.includes(u.id))
@@ -593,19 +860,20 @@ function StatusGroup({
             const progress = task.activities.length > 0
               ? Math.round((completedActs / task.activities.length) * 100)
               : 0
+            const overdue = isTaskOverdue(task)
 
             return (
               <div key={task.id}>
                 <div
                   className={cn(
-                    "flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors",
-                    isExpanded ? "bg-primary/5" : "hover:bg-muted/20"
+                    "flex items-center gap-3 pl-3 pr-4 py-3 cursor-pointer transition-all",
+                    isExpanded ? "bg-primary/[0.04]" : "hover:bg-muted/30"
                   )}
                   onClick={() => onToggleTask(task.id)}
                 >
                   {/* Correlative ID */}
-                  <span className="text-[10px] text-muted-foreground font-mono font-semibold shrink-0 w-8">
-                    #{task.correlativeId}
+                  <span className="text-[10px] font-mono font-semibold shrink-0 bg-muted/60 text-muted-foreground px-1.5 py-0.5 rounded-md">
+                    {formatCorrelativeId(task._projectName, task.correlativeId)}
                   </span>
 
                   {/* Task info */}
@@ -614,6 +882,11 @@ function StatusGroup({
                       <span className={cn("text-sm font-medium truncate", task.status === "finalizado" && "line-through text-muted-foreground")}>
                         {task.name}
                       </span>
+                      {overdue && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-500 shrink-0">
+                          <Clock className="h-3 w-3" /> vencida
+                        </span>
+                      )}
                       {task.tags?.slice(0, 3).map((tag) => <TagBadge key={tag.id} tag={tag} />)}
                       {(task.tags?.length ?? 0) > 3 && (
                         <span className="text-[10px] text-muted-foreground">+{task.tags!.length - 3}</span>
@@ -624,7 +897,9 @@ function StatusGroup({
                       {task.dueDate && (
                         <>
                           <span>·</span>
-                          <span>{new Date(task.dueDate).toLocaleDateString("es-CL", { day: "numeric", month: "short" })}</span>
+                          <span className={cn(overdue && "text-red-500 font-medium")}>
+                            {new Date(task.dueDate).toLocaleDateString("es-CL", { day: "numeric", month: "short" })}
+                          </span>
                         </>
                       )}
                       {task.activities.length > 0 && (
@@ -641,7 +916,7 @@ function StatusGroup({
                     <div className="w-12 shrink-0">
                       <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                         <div
-                          className={cn("h-full rounded-full", progress === 100 ? "bg-emerald-500" : "bg-primary")}
+                          className={cn("h-full rounded-full transition-all", progress === 100 ? "bg-emerald-500" : "bg-primary")}
                           style={{ width: `${progress}%` }}
                         />
                       </div>
@@ -668,9 +943,9 @@ function StatusGroup({
                   task={task}
                   allUsers={allUsers}
                   availableTags={availableTags.filter((t) => t.projectId === null || t.projectId === task._projectId)}
-                  defaultTab={defaultOpenTaskId === task.id ? defaultTab : "detalles"}
                   onUpdate={onUpdate}
                   onTagsUpdate={onTagsUpdate}
+                  onDelete={onDeleteTask}
                 />
               </div>
             )
@@ -698,9 +973,13 @@ function CoordinadorTareasPageContent() {
 
   // Filters
   const [filterProject, setFilterProject] = useState("all")
-  const [filterTag, setFilterTag] = useState("all")
+  const [filterTags, setFilterTags] = useState<Set<string>>(new Set())
   const [filterUser, setFilterUser] = useState("all")
   const [search, setSearch] = useState("")
+  const [currentView, setCurrentView] = useState<TaskView>(DEFAULT_TASK_VIEW)
+  const [sortKey, setSortKey] = useState<TaskSortKey>(DEFAULT_TASK_SORT_KEY)
+  const [sortDirection, setSortDirection] = useState<TaskSortDirection>(DEFAULT_TASK_SORT_DIRECTION)
+  const [groupBy, setGroupBy] = useState<GroupByKey>(DEFAULT_GROUP_BY)
 
   // Expanded task (inline panel)
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
@@ -709,8 +988,6 @@ function CoordinadorTareasPageContent() {
 
   const requestedTaskId = searchParams.get("task")
   const requestedNotificationId = searchParams.get("notification")
-  const requestedTab: CoordinatorTaskTab =
-    searchParams.get("tab") === "chat" ? "comentarios" : "detalles"
 
   // Create task dialog
   const [showCreate, setShowCreate] = useState(false)
@@ -725,6 +1002,43 @@ function CoordinadorTareasPageContent() {
   const [newTagName, setNewTagName] = useState("")
   const [newTagColor, setNewTagColor] = useState("#6366f1")
   const [tagProjectId, setTagProjectId] = useState("")
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    try {
+      const raw = window.localStorage.getItem(COORDINATOR_STORAGE_KEY)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as Partial<{
+        view: TaskView
+        sortKey: TaskSortKey
+        sortDirection: TaskSortDirection
+        groupBy: GroupByKey
+      }>
+
+      if (parsed.view) setCurrentView(parsed.view)
+      if (parsed.sortKey) setSortKey(parsed.sortKey)
+      if (parsed.sortDirection) setSortDirection(parsed.sortDirection)
+      if (parsed.groupBy) setGroupBy(parsed.groupBy)
+    } catch {
+      window.localStorage.removeItem(COORDINATOR_STORAGE_KEY)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    window.localStorage.setItem(
+      COORDINATOR_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        view: currentView,
+        sortKey,
+        sortDirection,
+        groupBy,
+      })
+    )
+  }, [currentView, sortDirection, sortKey, groupBy])
 
   useEffect(() => {
     const load = async () => {
@@ -761,8 +1075,8 @@ function CoordinadorTareasPageContent() {
     }).catch(() => {})
   }, [requestedNotificationId])
 
-  const myProjects = projects.filter((p) => p.coordinatorId === user?.id || user?.role === "admin")
-  const workers = allUsers.filter((u) => u.active)
+  const myProjects = projects.filter((p) => user?.role === "admin" || isProjectCoordinator(p, user?.id))
+  const workers = allUsers.filter((u) => u.active && u.role === "trabajador")
   const selectedProject = myProjects.find((p) => p.id === createForm.projectId)
   const workersForForm = allUsers.filter(
     (u) => u.active && u.role === "trabajador" && (selectedProject?.assignedWorkers ?? []).includes(u.id)
@@ -782,31 +1096,46 @@ function CoordinadorTareasPageContent() {
     const targetTask = allTasks.find((task) => task.id === requestedTaskId)
     if (!targetTask) return
 
-    const navigationKey = `${requestedTaskId}:${requestedTab}`
-    if (handledTargetRef.current === navigationKey) return
+    if (handledTargetRef.current === requestedTaskId) return
 
-    handledTargetRef.current = navigationKey
+    handledTargetRef.current = requestedTaskId
     setFilterProject("all")
-    setFilterTag("all")
+    setFilterTags(new Set())
     setFilterUser("all")
     setSearch("")
+    setCurrentView(getTaskViewForStatus(targetTask.status))
     setExpandedTaskId(requestedTaskId)
-  }, [allTasks, loading, requestedTaskId, requestedTab])
+  }, [allTasks, loading, requestedTaskId])
 
   // Apply filters
-  const filteredTasks = allTasks.filter((t) => {
-    if (filterProject !== "all" && t._projectId !== filterProject) return false
-    if (filterTag !== "all" && !(t.tags ?? []).some((tag) => tag.id === filterTag)) return false
-    if (filterUser !== "all" && !t.assignedTo.includes(filterUser)) return false
-    if (search && !t.name.toLowerCase().includes(search.toLowerCase())) return false
-    return true
-  })
+  const filteredTasks = useMemo(() => {
+    return allTasks.filter((task) => {
+      if (filterProject !== "all" && task._projectId !== filterProject) return false
+      if (filterTags.size > 0 && !(task.tags ?? []).some((tag) => filterTags.has(tag.id))) return false
+      if (filterUser !== "all" && !task.assignedTo.includes(filterUser)) return false
+      if (search && !task.name.toLowerCase().includes(search.toLowerCase())) return false
+      return true
+    })
+  }, [allTasks, filterProject, filterTags, filterUser, search])
 
-  // Group by status
-  const tasksByStatus = STATUS_ORDER.reduce((acc, status) => {
-    acc[status] = filteredTasks.filter((t) => t.status === status)
-    return acc
-  }, {} as Record<TaskStatus, typeof filteredTasks>)
+  const activeCount = useMemo(() => filterTasksByView(allTasks, "active").length, [allTasks])
+  const reviewCount = useMemo(() => filterTasksByView(allTasks, "review").length, [allTasks])
+  const completedCount = useMemo(() => filterTasksByView(allTasks, "completed").length, [allTasks])
+  const historyCount = useMemo(() => filterTasksByView(allTasks, "history").length, [allTasks])
+
+  const viewStatuses = useMemo(() => getStatusesForView(currentView), [currentView])
+  const visibleTasks = useMemo(() => {
+    return sortTasks(filterTasksByView(filteredTasks, currentView), sortKey, sortDirection)
+  }, [currentView, filteredTasks, sortDirection, sortKey])
+
+  const groupedTasks = useMemo(() => {
+    return groupTasksByStatus(visibleTasks, viewStatuses)
+  }, [viewStatuses, visibleTasks])
+
+  const genericGroups = useMemo(() => {
+    if (groupBy === "status") return []
+    return groupTasksBy(visibleTasks, groupBy)
+  }, [groupBy, visibleTasks])
 
   function handleToggleTask(taskId: string) {
     setExpandedTaskId((prev) => prev === taskId ? null : taskId)
@@ -831,6 +1160,23 @@ function CoordinadorTareasPageContent() {
     )
   }
 
+  async function handleDeleteTask(taskId: string) {
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`, { method: "DELETE" })
+      if (!res.ok) return
+      setProjects((prev) =>
+        prev.map((p) => ({
+          ...p,
+          tasks: (p.tasks ?? []).filter((t) => t.id !== taskId),
+        }))
+      )
+      if (expandedTaskId === taskId) setExpandedTaskId(null)
+      toast.success("Tarea eliminada")
+    } catch {
+      toast.error("Error al eliminar tarea")
+    }
+  }
+
   async function handleCreateTask() {
     if (!createForm.name.trim() || !createForm.projectId || !user) return
     setCreateLoading(true)
@@ -852,7 +1198,7 @@ function CoordinadorTareasPageContent() {
             : p
         )
       )
-      toast.success(`Tarea #${newTask.correlativeId} creada`)
+      toast.success(`Tarea ${formatCorrelativeId(selectedProject?.name ?? "", newTask.correlativeId)} creada`)
       setShowCreate(false)
       setCreateForm({ name: "", description: "", projectId: "", assignedTo: [], tagIds: [] })
     } catch {
@@ -918,80 +1264,180 @@ function CoordinadorTareasPageContent() {
   )
 
   return (
-    <div className="space-y-5 page-enter">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Gestión de Tareas</h1>
-          <p className="text-sm text-muted-foreground">{filteredTasks.length} tareas · {myProjects.length} proyectos</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setShowExport(true)}>
-            <Download className="h-4 w-4 mr-1" /> Exportar
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setShowTagManager(true)}>
-            <TagIcon className="h-4 w-4 mr-1" /> Etiquetas
-          </Button>
-          <Button size="sm" onClick={() => setShowCreate(true)}>
-            <Plus className="h-4 w-4 mr-1" /> Nueva tarea
-          </Button>
-        </div>
+    <div className="page-enter space-y-5">
+      {/* Header — full width */}
+      <TaskShellHeader
+        eyebrow="Sprint 3"
+        title="Gestión de tareas"
+        description={`${visibleTasks.length} visibles, ${myProjects.length} proyectos propios y ${historyCount} tareas en historial.`}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={() => setShowExport(true)}>
+              <Download className="mr-1 h-4 w-4" /> Exportar
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowTagManager(true)}>
+              <TagIcon className="mr-1 h-4 w-4" /> Etiquetas
+            </Button>
+            <Button size="sm" onClick={() => setShowCreate(true)}>
+              <Plus className="mr-1 h-4 w-4" /> Nueva tarea
+            </Button>
+          </>
+        }
+      />
+
+      {/* Stats — horizontal row */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <TaskShellStatCard label="Activas" value={activeCount} icon={ListTodo} tone="info" active={currentView === "active"} onClick={() => setCurrentView("active")} />
+        <TaskShellStatCard label="Revisión" value={reviewCount} icon={CheckCircle2} tone="warning" active={currentView === "review"} onClick={() => setCurrentView("review")} />
+        <TaskShellStatCard label="Finalizadas" value={completedCount} icon={CheckCheck} tone="success" active={currentView === "completed"} onClick={() => setCurrentView("completed")} />
+        <TaskShellStatCard label="Historial" value={historyCount} icon={Clock} active={currentView === "history"} onClick={() => setCurrentView("history")} />
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2 items-center">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Buscar tarea..." className="pl-9 h-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+      {/* Filter toolbar — compact */}
+      <TaskShellPanel title="Shell de filtros" description="Ordená el tablero por proyecto, etiquetas, responsable y criterio operativo.">
+        <div className="space-y-3">
+          {/* Row 1: view tabs + search */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap gap-1.5">
+              {(["active", "review", "completed", "history"] as TaskView[]).map((view) => {
+                const count = view === "active" ? activeCount : view === "review" ? reviewCount : view === "completed" ? completedCount : historyCount
+                return (
+                  <button
+                    key={view}
+                    type="button"
+                    onClick={() => setCurrentView(view)}
+                    className={cn("rounded-full px-3 py-1.5 text-xs font-medium transition-all", currentView === view ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground")}
+                  >
+                    {TASK_VIEW_LABELS[view]} · {count}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="relative flex-1 min-w-[180px]">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input placeholder="Buscar tarea..." className="h-9 rounded-xl pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+          </div>
+          {/* Row 2: selects + clear — horizontal flex-wrap */}
+          <div className="flex flex-wrap gap-2">
+            <Select value={filterProject} onValueChange={setFilterProject}>
+              <SelectTrigger className="h-9 w-auto min-w-[120px] rounded-xl text-xs"><SelectValue placeholder="Proyecto" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los proyectos</SelectItem>
+                {myProjects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {availableTags.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {availableTags.map((tag) => {
+                  const active = filterTags.has(tag.id)
+                  return (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() => setFilterTags((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(tag.id)) next.delete(tag.id)
+                        else next.add(tag.id)
+                        return next
+                      })}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-all",
+                        active
+                          ? "border-transparent text-white shadow-sm"
+                          : "border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/60"
+                      )}
+                      style={active ? { backgroundColor: tag.color, borderColor: tag.color } : {}}
+                    >
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: active ? "rgba(255,255,255,0.7)" : tag.color }}
+                      />
+                      {tag.name}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            <Select value={filterUser} onValueChange={setFilterUser}>
+              <SelectTrigger className="h-9 w-auto min-w-[120px] rounded-xl text-xs"><SelectValue placeholder="Responsable" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                {workers.map((worker) => <SelectItem key={worker.id} value={worker.id}>{worker.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={sortKey} onValueChange={(value) => setSortKey(value as TaskSortKey)}>
+              <SelectTrigger className="h-9 w-auto min-w-[120px] rounded-xl text-xs"><SelectValue placeholder="Ordenar por" /></SelectTrigger>
+              <SelectContent>
+                {(Object.keys(TASK_SORT_LABELS) as TaskSortKey[]).map((key) => <SelectItem key={key} value={key}>{TASK_SORT_LABELS[key]}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={sortDirection} onValueChange={(value) => setSortDirection(value as TaskSortDirection)}>
+              <SelectTrigger className="h-9 w-auto min-w-[120px] rounded-xl text-xs"><SelectValue placeholder="Dirección" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="asc">Ascendente</SelectItem>
+                <SelectItem value="desc">Descendente</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={groupBy} onValueChange={(value) => setGroupBy(value as GroupByKey)}>
+              <SelectTrigger className="h-9 w-auto min-w-[120px] rounded-xl text-xs"><SelectValue placeholder="Agrupar por" /></SelectTrigger>
+              <SelectContent>
+                {(Object.keys(GROUP_BY_LABELS) as GroupByKey[]).map((key) => <SelectItem key={key} value={key}>{GROUP_BY_LABELS[key]}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {(filterProject !== "all" || filterTags.size > 0 || filterUser !== "all" || search) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 px-3 text-xs text-muted-foreground"
+                onClick={() => { setFilterProject("all"); setFilterTags(new Set()); setFilterUser("all"); setSearch("") }}
+              >
+                <X className="mr-1 h-3.5 w-3.5" /> Limpiar
+              </Button>
+            )}
+          </div>
         </div>
-        <Select value={filterProject} onValueChange={setFilterProject}>
-          <SelectTrigger className="w-[180px] h-9"><SelectValue placeholder="Proyecto" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos los proyectos</SelectItem>
-            {myProjects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={filterTag} onValueChange={setFilterTag}>
-          <SelectTrigger className="w-[150px] h-9"><SelectValue placeholder="Etiqueta" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas las etiquetas</SelectItem>
-            {availableTags.map((tag) => (
-              <SelectItem key={tag.id} value={tag.id}>
-                <span className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: tag.color }} />
-                  {tag.name}
-                </span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={filterUser} onValueChange={setFilterUser}>
-          <SelectTrigger className="w-[160px] h-9"><SelectValue placeholder="Usuario" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            {workers.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
+      </TaskShellPanel>
 
-      {/* Task board grouped by status */}
-      <div className="space-y-3">
-        {STATUS_ORDER.map((status) => (
-          <StatusGroup
-            key={status}
-            status={status}
-            tasks={tasksByStatus[status]}
-            allUsers={allUsers}
-            availableTags={availableTags}
-            expandedTaskId={expandedTaskId}
-            defaultOpenTaskId={requestedTaskId}
-            defaultTab={requestedTab}
-            onToggleTask={handleToggleTask}
-            onUpdate={handleTaskUpdate}
-            onTagsUpdate={handleTagsUpdate}
-          />
-        ))}
-      </div>
+      {/* Task board — full width */}
+      <TaskShellBoard>
+        {visibleTasks.length === 0 ? (
+          <TaskShellPanel title={TASK_VIEW_LABELS[currentView]} description="No hay tareas en esta vista con los filtros actuales.">
+            <div className="py-6 text-sm text-muted-foreground">Ajustá el shell o cambiá de vista para recuperar tareas.</div>
+          </TaskShellPanel>
+        ) : groupBy === "status" ? (
+          groupedTasks.map(({ status, tasks: statusTasks }) => (
+            <StatusGroup
+              key={status}
+              status={status}
+              tasks={statusTasks}
+              allUsers={allUsers}
+              availableTags={availableTags}
+              expandedTaskId={expandedTaskId}
+              onToggleTask={handleToggleTask}
+              onUpdate={handleTaskUpdate}
+              onTagsUpdate={handleTagsUpdate}
+              onDeleteTask={handleDeleteTask}
+            />
+          ))
+        ) : (
+          genericGroups.map(({ key, label, tasks: groupTasks }) => (
+            <GenericGroup
+              key={key}
+              groupKey={key}
+              label={label}
+              tasks={groupTasks}
+              allUsers={allUsers}
+              availableTags={availableTags}
+              expandedTaskId={expandedTaskId}
+              onToggleTask={handleToggleTask}
+              onUpdate={handleTaskUpdate}
+              onTagsUpdate={handleTagsUpdate}
+              onDeleteTask={handleDeleteTask}
+            />
+          ))
+        )}
+      </TaskShellBoard>
 
       {/* Create Task Dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
@@ -1018,26 +1464,38 @@ function CoordinadorTareasPageContent() {
               <Textarea value={createForm.description} onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))} rows={2} />
             </div>
             <div className="space-y-1.5">
-              <Label>Asignar a</Label>
-              <div className="flex flex-wrap gap-2">
-                {workersForForm.map((w) => {
-                  const selected = createForm.assignedTo.includes(w.id)
-                  return (
-                    <button
-                      key={w.id}
-                      onClick={() => setCreateForm((f) => ({
-                        ...f,
-                        assignedTo: selected ? f.assignedTo.filter((u) => u !== w.id) : [...f.assignedTo, w.id],
-                      }))}
-                      className={cn(
-                        "flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border transition-colors",
-                        selected ? "bg-primary/10 border-primary/30 text-primary" : "bg-muted/50 border-border text-muted-foreground"
-                      )}
-                    >
-                      {w.name.split(" ")[0]}
-                    </button>
-                  )
-                })}
+              <Label>Responsable</Label>
+              <div className="rounded-xl border border-border/60 bg-muted/20 p-3 space-y-3">
+                <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                  <div>
+                    <span className="font-medium text-foreground">Coordinación:</span> vos
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Pool del proyecto:</span>{" "}
+                    {selectedProject ? `${workersForForm.length} trabajador${workersForForm.length === 1 ? "" : "es"}` : "—"}
+                  </div>
+                </div>
+                <Select
+                  value={createForm.assignedTo[0] ?? "none"}
+                  onValueChange={(value) => setCreateForm((form) => ({
+                    ...form,
+                    assignedTo: value === "none" ? [] : [value],
+                  }))}
+                  disabled={!selectedProject}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar trabajador responsable" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin responsable por ahora</SelectItem>
+                    {workersForForm.map((worker) => (
+                      <SelectItem key={worker.id} value={worker.id}>
+                        {worker.name} - {worker.position}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">Regla Sprint 5: cada tarea queda con un solo trabajador responsable.</p>
               </div>
             </div>
             {createForm.projectId && tagsForSelectedProject.length > 0 && (

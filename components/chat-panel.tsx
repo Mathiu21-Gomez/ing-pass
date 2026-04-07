@@ -8,6 +8,7 @@ import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { ImageUpload, type ImageUploadItem } from "@/components/image-upload"
 import { Textarea } from "@/components/ui/textarea"
+import { extractTaskChatClipboardFiles } from "@/lib/task-chat-clipboard"
 import { useAuth } from "@/lib/contexts/auth-context"
 import type { CommentAttachment } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -587,8 +588,13 @@ export function ChatPanel({
     })
   }, [])
 
-  async function handleTaskChatFilesSelected(files: File[]) {
+  async function handleTaskChatFilesSelected(
+    files: File[],
+    options?: { source?: "clipboard" | "manual" }
+  ) {
     if (!taskId) return
+
+    const source = options?.source ?? "manual"
 
     for (const file of files) {
       const tempId = `pending-${crypto.randomUUID()}`
@@ -609,7 +615,7 @@ export function ChatPanel({
       try {
         const formData = new FormData()
         formData.set("file", file)
-        formData.set("source", "manual")
+        formData.set("source", source)
 
         const response = await fetch(`/api/tasks/${taskId}/chat/attachments`, {
           method: "POST",
@@ -765,11 +771,11 @@ export function ChatPanel({
 
   async function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
     if (!taskChatEnabled || !taskId) return
-    const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"))
+    const files = extractTaskChatClipboardFiles(e.clipboardData)
     if (files.length === 0) return
     e.preventDefault()
     setShowImageUpload(true)
-    await handleTaskChatFilesSelected(files)
+    await handleTaskChatFilesSelected(files, { source: "clipboard" })
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -824,7 +830,7 @@ export function ChatPanel({
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-[200px] max-h-[400px]">
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-[200px] max-h-[520px]">
           {taskChatEnabled && nextCursor && !loading && (
             <div className="flex justify-center">
               <Button

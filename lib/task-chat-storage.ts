@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto"
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises"
 import path from "node:path"
 
 import { and, eq, isNull } from "drizzle-orm"
@@ -14,17 +13,13 @@ import {
   type TaskChatStagedAttachment,
 } from "@/lib/task-chat-schemas"
 
-const DEFAULT_TASK_CHAT_STORAGE_ROOT = path.join(process.cwd(), ".task-chat-storage")
-
 export interface TaskChatStorageAdapter {
-  cleanup(storageKey: string): Promise<void>
-  read(storageKey: string): Promise<Buffer>
   stage(input: {
     attachmentId: string
     file: File
     taskId: string
     threadId: string
-  }): Promise<{ storageKey: string }>
+  }): Promise<{ blobDataBase64?: string; storageKey: string }>
 }
 
 function sanitizePathSegment(value: string) {
@@ -62,31 +57,30 @@ function resolveFileName(file: File) {
   return `attachment${getFileExtension(file)}`
 }
 
-export function createLocalTaskChatStorageAdapter(
-  rootDir = DEFAULT_TASK_CHAT_STORAGE_ROOT
-): TaskChatStorageAdapter {
+function buildTaskChatStorageKey(input: {
+  attachmentId: string
+  file: File
+  taskId: string
+  threadId: string
+}) {
+  const extension = getFileExtension(input.file)
+
+  return path.join(
+    sanitizePathSegment(input.taskId),
+    sanitizePathSegment(input.threadId),
+    `${input.attachmentId}${extension}`
+  )
+}
+
+export function createDatabaseTaskChatStorageAdapter(): TaskChatStorageAdapter {
   return {
-    async cleanup(storageKey) {
-      const fullPath = path.join(rootDir, storageKey)
-      await unlink(fullPath)
-    },
-    async read(storageKey) {
-      const fullPath = path.join(rootDir, storageKey)
-      return readFile(fullPath)
-    },
     async stage({ attachmentId, file, taskId, threadId }) {
-      const extension = getFileExtension(file)
-      const storageKey = path.join(
-        sanitizePathSegment(taskId),
-        sanitizePathSegment(threadId),
-        `${attachmentId}${extension}`
-      )
+      const storageKey = buildTaskChatStorageKey({ attachmentId, file, taskId, threadId })
 
-      const fullPath = path.join(rootDir, storageKey)
-      await mkdir(path.dirname(fullPath), { recursive: true })
-      await writeFile(fullPath, Buffer.from(await file.arrayBuffer()))
-
-      return { storageKey }
+      return {
+        blobDataBase64: Buffer.from(await file.arrayBuffer()).toString("base64"),
+        storageKey,
+      }
     },
   }
 }
@@ -95,7 +89,7 @@ let cachedTaskChatStorageAdapter: TaskChatStorageAdapter | null = null
 
 export function getTaskChatStorageAdapter() {
   if (!cachedTaskChatStorageAdapter) {
-    cachedTaskChatStorageAdapter = createLocalTaskChatStorageAdapter()
+    cachedTaskChatStorageAdapter = createDatabaseTaskChatStorageAdapter()
   }
 
   return cachedTaskChatStorageAdapter
@@ -142,7 +136,7 @@ export async function stageTaskChatAttachment(input: {
   const adapter = input.adapter ?? getTaskChatStorageAdapter()
   const threadId = await ensureTaskChatThread(input.taskId, input.uploaderId)
   const attachmentId = randomUUID()
-  const { storageKey } = await adapter.stage({
+  const { blobDataBase64, storageKey } = await adapter.stage({
     attachmentId,
     file: input.file,
     taskId: input.taskId,
@@ -173,6 +167,7 @@ export async function stageTaskChatAttachment(input: {
         documentId: document.id,
         id: attachmentId,
         messageId: null,
+        blobDataBase64: blobDataBase64 ?? null,
         source: parsedInput.source,
         storageKey,
         threadId,
@@ -189,16 +184,13 @@ export async function stageTaskChatAttachment(input: {
       status: "pending",
     })
   } catch (error) {
-    await adapter.cleanup(storageKey).catch(() => undefined)
     throw error
   }
 }
 
 export async function getTaskChatAttachmentFile(input: {
-  adapter?: TaskChatStorageAdapter
   attachmentId: string
 }) {
-  const adapter = input.adapter ?? getTaskChatStorageAdapter()
   const rows = await db
     .select({
       attachmentId: taskChatAttachments.id,
@@ -206,6 +198,7 @@ export async function getTaskChatAttachmentFile(input: {
       messageId: taskChatAttachments.messageId,
       mimeType: documents.type,
       sizeBytes: documents.sizeBytes,
+      blobDataBase64: taskChatAttachments.blobDataBase64,
       storageKey: taskChatAttachments.storageKey,
       taskId: documents.taskId,
       uploadedBy: taskChatAttachments.uploadedBy,
@@ -216,8 +209,13 @@ export async function getTaskChatAttachmentFile(input: {
 
   const attachment = rows[0]
   if (!attachment) return null
+  if (!attachment.blobDataBase64) {
+    throw new Error(
+      `El adjunto legacy ${attachment.attachmentId} no fue migrado a la base de datos. Ejecuta el backfill de task chat attachments antes de servirlo.`
+    )
+  }
 
-  const body = await adapter.read(attachment.storageKey)
+  const body = Buffer.from(attachment.blobDataBase64, "base64")
 
   return {
     ...attachment,
@@ -226,15 +224,14 @@ export async function getTaskChatAttachmentFile(input: {
 }
 
 export async function deleteTaskChatStagedAttachment(input: {
-  adapter?: TaskChatStorageAdapter
   attachmentId: string
   taskId: string
   uploaderId: string
 }) {
-  const adapter = input.adapter ?? getTaskChatStorageAdapter()
   const rows = await db
     .select({
       documentId: documents.id,
+      blobDataBase64: taskChatAttachments.blobDataBase64,
       storageKey: taskChatAttachments.storageKey,
     })
     .from(taskChatAttachments)
@@ -252,6 +249,5 @@ export async function deleteTaskChatStagedAttachment(input: {
   if (!attachment) return false
 
   await db.delete(documents).where(eq(documents.id, attachment.documentId))
-  await adapter.cleanup(attachment.storageKey).catch(() => undefined)
   return true
 }

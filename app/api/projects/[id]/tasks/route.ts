@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/db"
-import { tasks, taskAssignments, activities, documents, projectWorkers, taskTags, tags, notifications } from "@/db/schema"
+import { tasks, taskAssignments, activities, documents, projectWorkers, taskTags, tags, notifications, user as userTable } from "@/db/schema"
 import { taskSchema } from "@/lib/schemas"
 import { and, eq, inArray, max } from "drizzle-orm"
 import { getAuthUser } from "@/lib/api-auth"
 import { getProjectAccessContext } from "@/lib/project-access"
+
+const SINGLE_ASSIGNEE_ERROR = "Cada tarea puede tener solo 1 trabajador responsable"
 
 async function createTaskAssignedNotifications(input: {
   taskId: string
@@ -82,7 +84,7 @@ export async function GET(
     const enriched = await Promise.all(
       projectTasks.map(async (task) => {
         const assigns = await db
-          .select()
+          .select({ userId: taskAssignments.userId, role: taskAssignments.role })
           .from(taskAssignments)
           .where(eq(taskAssignments.taskId, task.id))
 
@@ -104,7 +106,8 @@ export async function GET(
 
         return {
           ...task,
-          assignedTo: assigns.map((a) => a.userId),
+          assignedTo: assigns.filter((a) => a.role === "primary").map((a) => a.userId),
+          supportIds: assigns.filter((a) => a.role === "support").map((a) => a.userId),
           activities: taskActivities,
           documents: taskDocs,
           tags: taskTagRows,
@@ -190,6 +193,13 @@ export async function POST(
       )
     }
 
+    if (assignedTo.length > 1) {
+      return NextResponse.json(
+        { error: SINGLE_ASSIGNEE_ERROR },
+        { status: 400 }
+      )
+    }
+
     if (assignedTo.length > 0) {
       const validAssignments = await db
         .select({ userId: projectWorkers.userId })
@@ -201,9 +211,27 @@ export async function POST(
           )
         )
 
+      const candidateWorkers = await db
+        .select({ id: userTable.id })
+        .from(userTable)
+        .where(
+          and(
+            inArray(userTable.id, assignedTo),
+            eq(userTable.active, true),
+            eq(userTable.role, "trabajador")
+          )
+        )
+
       if (validAssignments.length !== assignedTo.length) {
         return NextResponse.json(
           { error: "Hay trabajadores que no pertenecen al proyecto" },
+          { status: 400 }
+        )
+      }
+
+      if (candidateWorkers.length !== assignedTo.length) {
+        return NextResponse.json(
+          { error: "Solo se puede asignar un trabajador activo por tarea" },
           { status: 400 }
         )
       }
@@ -245,7 +273,7 @@ export async function POST(
 
         if (assignedTo.length > 0) {
           await db.insert(taskAssignments).values(
-            assignedTo.map((userId) => ({ taskId: createdTask.id, userId }))
+            assignedTo.map((userId) => ({ taskId: createdTask.id, userId, role: "primary" as const }))
           )
         }
 
@@ -291,7 +319,7 @@ export async function POST(
     }
 
     return NextResponse.json(
-      { ...newTask, assignedTo, activities: [], documents: [], tags: createdTagRows },
+      { ...newTask, assignedTo, supportIds: [], activities: [], documents: [], tags: createdTagRows },
       { status: 201 }
     )
   } catch (error) {

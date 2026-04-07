@@ -9,11 +9,10 @@ import {
   useEffect,
   type ReactNode,
 } from "react"
-import type { TimerStatus, HourlyProgress, TimeEntry } from "@/lib/types"
+import type { TimerStatus, HourlyProgress, TimeEntry, TimeEntryEnriched } from "@/lib/types"
 import { timeEntriesApi } from "@/lib/services/api"
 import { useAuth } from "@/lib/contexts/auth-context"
 import {
-  getTimerStorageKey,
   isActiveTimerStatus,
   isValidTimerSnapshot,
   restoreTimerState,
@@ -53,31 +52,38 @@ interface TimerState {
   sessionEntries: TimeEntry[]
   // Chat session ID — generated at startDay, groups messages for this jornada
   activeSessionId: string | null
+  activeEntryId: string | null
+}
+
+interface EndDayPayload {
+  notes?: string
+  progressPercentage?: number
+  progressJustification?: string
 }
 
 interface TimerContextType extends TimerState {
-  startDay: (projectId: string, taskId: string, userId?: string, sessionId?: string) => string
-  startLunch: () => void
-  endLunch: () => void
+  startDay: (projectId: string, taskId: string, userId?: string, sessionId?: string) => Promise<string>
+  startLunch: () => Promise<void>
+  endLunch: () => Promise<void>
   pauseWork: () => void
   resumeWork: () => void
-  startMeeting: () => void
-  endMeeting: () => void
-  endDay: () => void
-  switchTask: (projectId: string, taskId: string) => void
+  startMeeting: () => Promise<void>
+  endMeeting: () => Promise<void>
+  endDay: (payload?: EndDayPayload) => Promise<void>
+  switchTask: (projectId: string, taskId: string) => Promise<void>
   openSwitchTaskDialog: () => void
   closeSwitchTaskDialog: () => void
   dismissLunchAlert: () => void
   dismissEndWarning: () => void
   dismissDaySummary: () => void
-  dismissAutoEndDialog: () => void
-  continueAsExtra: () => void
+  dismissAutoEndDialog: () => Promise<void>
+  continueAsExtra: () => Promise<void>
   formatTime: (seconds: number) => string
   // Hourly progress functions
-  recordHourlyProgress: (description: string) => void
-  dismissProgressPrompt: () => void
+  recordHourlyProgress: (description: string) => Promise<void>
+  dismissProgressPrompt: () => Promise<void>
   // Manual progress functions
-  updateManualProgress: (percentage: number, note: string) => void
+  updateManualProgress: (percentage: number, note: string) => Promise<void>
   // Schedule
   scheduleEndTime: string | null
   setScheduleEndTime: (time: string | null) => void
@@ -89,6 +95,75 @@ const ONE_HOUR = 60 * 60
 const FOUR_HOURS = 4 * 60 * 60
 const SEVEN_HOURS_55 = 7 * 60 * 60 + 55 * 60
 const EIGHT_HOURS = 8 * 60 * 60
+
+function formatClockTime(date: Date | null) {
+  if (!date) return null
+
+  return date.toLocaleTimeString("es-CL", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+}
+
+function parseEntryDateTime(date: string, time: string | null) {
+  if (!time) return null
+
+  const parsed = new Date(`${date}T${time}:00`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function createFallbackSnapshot(entry: TimeEntryEnriched, userId: string): TimerSnapshot {
+  const startTime = parseEntryDateTime(entry.date, entry.startTime)
+  const lunchStartTime = parseEntryDateTime(entry.date, entry.lunchStartTime)
+  const lunchEndTime = parseEntryDateTime(entry.date, entry.lunchEndTime)
+  const now = Date.now()
+  const safeStart = startTime?.getTime() ?? now
+
+  return {
+    version: 1,
+    userId,
+    scheduleEndTime: null,
+    workStartTimestamp: safeStart,
+    totalPausedMs: 0,
+    totalLunchMs: lunchStartTime && lunchEndTime ? lunchEndTime.getTime() - lunchStartTime.getTime() : 0,
+    lunchAlertShown: false,
+    endWarningShown: false,
+    autoEndShown: false,
+    hourMilestonesShown: [],
+    state: {
+      status: entry.status,
+      elapsedWorkSeconds: Math.max(0, Math.round(entry.effectiveHours * 3600)),
+      elapsedLunchSeconds: 0,
+      elapsedPauseSeconds: 0,
+      elapsedMeetingSeconds: 0,
+      startTime: startTime?.toISOString() ?? new Date(safeStart).toISOString(),
+      lunchStartTime: lunchStartTime?.toISOString() ?? null,
+      lunchEndTime: lunchEndTime?.toISOString() ?? null,
+      pauseStartTime: null,
+      meetingStartTime: entry.status === "reunion" ? new Date(now).toISOString() : null,
+      userId,
+      currentProjectId: entry.projectId,
+      currentTaskId: entry.taskId,
+      showLunchAlert: false,
+      showEndWarning: false,
+      showDaySummary: false,
+      showSwitchTaskDialog: false,
+      showAutoEndDialog: false,
+      isExtraTime: false,
+      hourlyProgress: [],
+      showProgressPrompt: false,
+      pendingHourMilestone: null,
+      manualProgressPercentage: entry.progressPercentage,
+      pauseCount: entry.pauseCount,
+      meetingCount: 0,
+      progressNotes: [],
+      sessionEntries: [],
+      activeSessionId: null,
+      activeEntryId: entry.id,
+    },
+  }
+}
 
 const INITIAL_TIMER_STATE: TimerState = {
   status: "inactivo",
@@ -119,6 +194,7 @@ const INITIAL_TIMER_STATE: TimerState = {
   progressNotes: [],
   sessionEntries: [],
   activeSessionId: null,
+  activeEntryId: null,
 }
 
 export function TimerProvider({ children }: { children: ReactNode }) {
@@ -135,6 +211,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   const autoEndShown = useRef(false)
   const hourMilestonesShown = useRef<Set<number>>(new Set())
   const hydratedUserIdRef = useRef<string | null>(null)
+  const meetingBaseSecondsRef = useRef(0)
 
   // Store timestamps for accurate calculation
   const workStartTimestamp = useRef<number | null>(null)
@@ -228,71 +305,51 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     })
   }, [scheduleEndTime])
 
-  const startInterval = useCallback(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current)
-    intervalRef.current = setInterval(tick, 1000)
-  }, [tick])
+  const startStatusInterval = useCallback(
+    (status: TimerStatus) => {
+      if (intervalRef.current) clearInterval(intervalRef.current)
 
-  useEffect(() => {
-    if (!user?.id || hydratedUserIdRef.current === user.id) return
-
-    const storageKey = getTimerStorageKey(user.id)
-
-    try {
-      const rawSnapshot = window.localStorage.getItem(storageKey)
-
-      if (!rawSnapshot) {
-        hydratedUserIdRef.current = user.id
-        setHasHydratedSnapshot(true)
+      if (status === "trabajando") {
+        intervalRef.current = setInterval(tick, 1000)
         return
       }
 
-      const parsedSnapshot: unknown = JSON.parse(rawSnapshot)
-      if (!isValidTimerSnapshot(parsedSnapshot, user.id)) {
-        window.localStorage.removeItem(storageKey)
-        hydratedUserIdRef.current = user.id
-        setHasHydratedSnapshot(true)
+      if (status === "colacion") {
+        intervalRef.current = setInterval(() => {
+          setState((prev) => {
+            if (prev.status !== "colacion" || !prev.lunchStartTime) return prev
+
+            return {
+              ...prev,
+              elapsedLunchSeconds: Math.max(0, Math.floor((Date.now() - prev.lunchStartTime.getTime()) / 1000)),
+            }
+          })
+        }, 1000)
         return
       }
 
-      const restoredState = restoreTimerState(parsedSnapshot)
+      if (status === "reunion") {
+        intervalRef.current = setInterval(() => {
+          setState((prev) => {
+            if (prev.status !== "reunion" || !prev.meetingStartTime) return prev
 
-      workStartTimestamp.current = parsedSnapshot.workStartTimestamp
-      totalPausedMs.current = parsedSnapshot.totalPausedMs
-      totalLunchMs.current = parsedSnapshot.totalLunchMs
-      lunchAlertShown.current = parsedSnapshot.lunchAlertShown
-      endWarningShown.current = parsedSnapshot.endWarningShown
-      autoEndShown.current = parsedSnapshot.autoEndShown
-      hourMilestonesShown.current = new Set(parsedSnapshot.hourMilestonesShown)
-
-      setScheduleEndTime(parsedSnapshot.scheduleEndTime)
-      setState(restoredState)
-      hydratedUserIdRef.current = user.id
-      setHasHydratedSnapshot(true)
-
-      if (parsedSnapshot.state.status === "trabajando") {
-        startInterval()
+            return {
+              ...prev,
+              elapsedMeetingSeconds:
+                meetingBaseSecondsRef.current +
+                Math.max(0, Math.floor((Date.now() - prev.meetingStartTime.getTime()) / 1000)),
+            }
+          })
+        }, 1000)
       }
-    } catch {
-      window.localStorage.removeItem(storageKey)
-      hydratedUserIdRef.current = user.id
-      setHasHydratedSnapshot(true)
-    }
-  }, [user?.id, startInterval])
+    },
+    [tick]
+  )
 
-  useEffect(() => {
-    if (!user?.id || hydratedUserIdRef.current !== user.id || !hasHydratedSnapshot) return
-
-    const storageKey = getTimerStorageKey(user.id)
-
-    if (!isActiveTimerStatus(state.status) || state.userId !== user.id) {
-      window.localStorage.removeItem(storageKey)
-      return
-    }
-
-    const snapshot: TimerSnapshot = {
+  const buildRuntimeState = useCallback(
+    (currentState: TimerState, effectiveUserId: string): TimerSnapshot => ({
       version: 1,
-      userId: user.id,
+      userId: effectiveUserId,
       scheduleEndTime,
       workStartTimestamp: workStartTimestamp.current,
       totalPausedMs: totalPausedMs.current,
@@ -302,48 +359,136 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       autoEndShown: autoEndShown.current,
       hourMilestonesShown: Array.from(hourMilestonesShown.current),
       state: {
-        status: state.status,
-        elapsedWorkSeconds: state.elapsedWorkSeconds,
-        elapsedLunchSeconds: state.elapsedLunchSeconds,
-        elapsedPauseSeconds: state.elapsedPauseSeconds,
-        elapsedMeetingSeconds: state.elapsedMeetingSeconds,
-        startTime: state.startTime?.toISOString() ?? null,
-        lunchStartTime: state.lunchStartTime?.toISOString() ?? null,
-        lunchEndTime: state.lunchEndTime?.toISOString() ?? null,
-        pauseStartTime: state.pauseStartTime?.toISOString() ?? null,
-        meetingStartTime: state.meetingStartTime?.toISOString() ?? null,
-        userId: state.userId,
-        currentProjectId: state.currentProjectId,
-        currentTaskId: state.currentTaskId,
-        showLunchAlert: state.showLunchAlert,
-        showEndWarning: state.showEndWarning,
-        showDaySummary: state.showDaySummary,
-        showSwitchTaskDialog: state.showSwitchTaskDialog,
-        showAutoEndDialog: state.showAutoEndDialog,
-        isExtraTime: state.isExtraTime,
-        hourlyProgress: state.hourlyProgress.map((progress) => ({
+        status: currentState.status,
+        elapsedWorkSeconds: currentState.elapsedWorkSeconds,
+        elapsedLunchSeconds: currentState.elapsedLunchSeconds,
+        elapsedPauseSeconds: currentState.elapsedPauseSeconds,
+        elapsedMeetingSeconds: currentState.elapsedMeetingSeconds,
+        startTime: currentState.startTime?.toISOString() ?? null,
+        lunchStartTime: currentState.lunchStartTime?.toISOString() ?? null,
+        lunchEndTime: currentState.lunchEndTime?.toISOString() ?? null,
+        pauseStartTime: currentState.pauseStartTime?.toISOString() ?? null,
+        meetingStartTime: currentState.meetingStartTime?.toISOString() ?? null,
+        userId: currentState.userId,
+        currentProjectId: currentState.currentProjectId,
+        currentTaskId: currentState.currentTaskId,
+        showLunchAlert: currentState.showLunchAlert,
+        showEndWarning: currentState.showEndWarning,
+        showDaySummary: currentState.showDaySummary,
+        showSwitchTaskDialog: currentState.showSwitchTaskDialog,
+        showAutoEndDialog: currentState.showAutoEndDialog,
+        isExtraTime: currentState.isExtraTime,
+        hourlyProgress: currentState.hourlyProgress.map((progress) => ({
           ...progress,
           timestamp: progress.timestamp.toISOString(),
         })),
-        showProgressPrompt: state.showProgressPrompt,
-        pendingHourMilestone: state.pendingHourMilestone,
-        manualProgressPercentage: state.manualProgressPercentage,
-        pauseCount: state.pauseCount,
-        meetingCount: state.meetingCount,
-        progressNotes: state.progressNotes.map((note) => ({
+        showProgressPrompt: currentState.showProgressPrompt,
+        pendingHourMilestone: currentState.pendingHourMilestone,
+        manualProgressPercentage: currentState.manualProgressPercentage,
+        pauseCount: currentState.pauseCount,
+        meetingCount: currentState.meetingCount,
+        progressNotes: currentState.progressNotes.map((note) => ({
           ...note,
           timestamp: note.timestamp.toISOString(),
         })),
-        sessionEntries: state.sessionEntries,
-        activeSessionId: state.activeSessionId,
+        sessionEntries: currentState.sessionEntries,
+        activeSessionId: currentState.activeSessionId,
+        activeEntryId: currentState.activeEntryId,
       },
+    }),
+    [scheduleEndTime]
+  )
+
+  const syncActiveEntry = useCallback(
+    async (nextState: TimerState, overrides: Partial<TimeEntry> = {}) => {
+      if (!nextState.activeEntryId || !nextState.userId) {
+        throw new Error("No existe un registro activo en la base de datos para sincronizar la jornada")
+      }
+
+      await timeEntriesApi.update(nextState.activeEntryId, {
+        projectId: nextState.currentProjectId ?? undefined,
+        taskId: nextState.currentTaskId ?? undefined,
+        status: nextState.status,
+        lunchStartTime: formatClockTime(nextState.lunchStartTime),
+        lunchEndTime: formatClockTime(nextState.lunchEndTime),
+        progressPercentage: nextState.manualProgressPercentage,
+        pauseCount: nextState.pauseCount,
+        runtimeState: buildRuntimeState(nextState, nextState.userId),
+        ...overrides,
+      })
+    },
+    [buildRuntimeState]
+  )
+
+  useEffect(() => {
+    const authUserId = user?.id ?? null
+    if (!authUserId || hydratedUserIdRef.current === authUserId) return
+
+    let cancelled = false
+
+    async function hydrateFromDatabase() {
+      if (!authUserId) return
+
+      try {
+        const activeEntries = await timeEntriesApi.getAll({ active: true, userId: authUserId })
+        const activeEntry = activeEntries[0]
+
+        if (!activeEntry) {
+          if (cancelled) return
+          hydratedUserIdRef.current = authUserId
+          setHasHydratedSnapshot(true)
+          return
+        }
+
+        const snapshot = isValidTimerSnapshot(activeEntry.runtimeState, authUserId)
+          ? activeEntry.runtimeState
+          : createFallbackSnapshot(activeEntry, authUserId)
+
+        const restoredState = restoreTimerState(snapshot)
+
+        workStartTimestamp.current = snapshot.workStartTimestamp
+        totalPausedMs.current = snapshot.totalPausedMs
+        totalLunchMs.current = snapshot.totalLunchMs
+        lunchAlertShown.current = snapshot.lunchAlertShown
+        endWarningShown.current = snapshot.endWarningShown
+        autoEndShown.current = snapshot.autoEndShown
+        hourMilestonesShown.current = new Set(snapshot.hourMilestonesShown)
+        meetingBaseSecondsRef.current = snapshot.state.elapsedMeetingSeconds
+
+        if (cancelled) return
+
+        setScheduleEndTime(snapshot.scheduleEndTime)
+        setState(restoredState)
+        hydratedUserIdRef.current = authUserId
+        setHasHydratedSnapshot(true)
+        startStatusInterval(snapshot.state.status)
+      } catch (error) {
+        console.error("Error hydrating active workday from DB:", error)
+        if (cancelled) return
+        hydratedUserIdRef.current = authUserId
+        setHasHydratedSnapshot(true)
+      }
     }
 
-    window.localStorage.setItem(storageKey, JSON.stringify(snapshot))
-  }, [hasHydratedSnapshot, scheduleEndTime, state, user?.id])
+    void hydrateFromDatabase()
+
+    return () => {
+      cancelled = true
+    }
+  }, [startStatusInterval, user?.id])
 
   const startDay = useCallback(
-    (projectId: string, taskId: string, userId?: string, existingSessionId?: string): string => {
+    async (projectId: string, taskId: string, userId?: string, existingSessionId?: string): Promise<string> => {
+      const effectiveUserId = userId ?? user?.id ?? null
+
+      if (!effectiveUserId) {
+        throw new Error("No se pudo identificar al usuario de la jornada")
+      }
+
+      if (!projectId || !taskId) {
+        throw new Error("Selecciona un proyecto y tarea válidos antes de iniciar")
+      }
+
       lunchAlertShown.current = false
       endWarningShown.current = false
       autoEndShown.current = false
@@ -351,21 +496,41 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       workStartTimestamp.current = Date.now()
       totalPausedMs.current = 0
       totalLunchMs.current = 0
+      meetingBaseSecondsRef.current = 0
 
       const sessionId = existingSessionId ?? crypto.randomUUID()
+      const startTime = new Date()
 
-      setState({
+      const createdEntry = await timeEntriesApi.create({
+        userId: effectiveUserId,
+        projectId,
+        taskId,
+        date: startTime.toISOString().split("T")[0],
+        startTime: startTime.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", hour12: false }),
+        lunchStartTime: null,
+        lunchEndTime: null,
+        endTime: null,
+        effectiveHours: 0,
+        status: "trabajando",
+        notes: "",
+        progressPercentage: 0,
+        pauseCount: 0,
+        progressJustification: "",
+        editable: true,
+      })
+
+      const nextState: TimerState = {
         status: "trabajando",
         elapsedWorkSeconds: 0,
         elapsedLunchSeconds: 0,
         elapsedPauseSeconds: 0,
         elapsedMeetingSeconds: 0,
-        startTime: new Date(),
+        startTime,
         lunchStartTime: null,
         lunchEndTime: null,
         pauseStartTime: null,
         meetingStartTime: null,
-        userId: userId ?? null,
+        userId: effectiveUserId,
         currentProjectId: projectId,
         currentTaskId: taskId,
         showLunchAlert: false,
@@ -383,96 +548,73 @@ export function TimerProvider({ children }: { children: ReactNode }) {
         progressNotes: [],
         sessionEntries: [],
         activeSessionId: sessionId,
-      })
-      startInterval()
+        activeEntryId: createdEntry.id,
+      }
+
+      await syncActiveEntry(nextState)
+      setState(nextState)
+      startStatusInterval("trabajando")
       return sessionId
     },
-    [startInterval]
+    [startStatusInterval, syncActiveEntry, user?.id]
   )
 
-  const startLunch = useCallback(() => {
+  const startLunch = useCallback(async () => {
+    const current = stateRef.current
+    if (current.status !== "trabajando") return
+    if (!current.activeEntryId) {
+      throw new Error("No existe un registro activo en la base de datos para iniciar la colación")
+    }
+
     if (intervalRef.current) {
       clearInterval(intervalRef.current)
       intervalRef.current = null
     }
+
     const lunchStart = new Date()
-    setState((prev) => ({
-      ...prev,
+    const nextState: TimerState = {
+      ...current,
       status: "colacion",
       lunchStartTime: lunchStart,
       showLunchAlert: false,
-    }))
-    // Track lunch time
-    const lunchStartMs = Date.now()
-    intervalRef.current = setInterval(() => {
-      const lunchElapsed = Math.floor((Date.now() - lunchStartMs) / 1000)
-      setState((prev) => {
-        if (prev.status !== "colacion") return prev
-        return { ...prev, elapsedLunchSeconds: lunchElapsed }
-      })
-    }, 1000)
-  }, [])
-
-  const endLunch = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current)
-      intervalRef.current = null
     }
-    setState((prev) => {
-      // Calculate lunch duration and add to total
-      if (prev.lunchStartTime) {
-        const lunchDuration = Date.now() - prev.lunchStartTime.getTime()
-        totalLunchMs.current += lunchDuration
-      }
-      return {
-        ...prev,
-        status: "trabajando",
-        lunchEndTime: new Date(),
-      }
+
+    await syncActiveEntry(nextState, {
+      lunchEndTime: null,
+      status: "colacion",
     })
-    startInterval()
-  }, [startInterval])
+    setState(nextState)
+    startStatusInterval("colacion")
+  }, [startStatusInterval, syncActiveEntry])
 
-  const pauseWork = useCallback(() => {
+  const endLunch = useCallback(async () => {
+    const current = stateRef.current
+    if (current.status !== "colacion") return
+    if (!current.lunchStartTime || !current.activeEntryId) {
+      throw new Error("No existe una colación activa para retomar la jornada")
+    }
+
     if (intervalRef.current) {
       clearInterval(intervalRef.current)
       intervalRef.current = null
     }
-    const pauseStart = new Date()
-    setState((prev) => ({
-      ...prev,
-      status: "pausado",
-      pauseStartTime: pauseStart,
-      pauseCount: prev.pauseCount + 1,
-    }))
-    // Track pause time
-    const pauseStartMs = Date.now()
-    intervalRef.current = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - pauseStartMs) / 1000)
-      setState((prev) => {
-        if (prev.status !== "pausado") return prev
-        return { ...prev, elapsedPauseSeconds: prev.elapsedPauseSeconds + 0 } // Keep current value, update below
-      })
-    }, 1000)
-  }, [])
 
-  const resumeWork = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current)
-      intervalRef.current = null
+    totalLunchMs.current += Date.now() - current.lunchStartTime.getTime()
+
+    const nextState: TimerState = {
+      ...current,
+      status: "trabajando",
+      lunchEndTime: new Date(),
     }
-    setState((prev) => {
-      // Calculate pause duration and add to total
-      if (prev.pauseStartTime) {
-        const pauseDuration = Date.now() - prev.pauseStartTime.getTime()
-        totalPausedMs.current += pauseDuration
-        const totalPauseSecs = Math.floor(totalPausedMs.current / 1000)
-        return { ...prev, status: "trabajando", pauseStartTime: null, elapsedPauseSeconds: totalPauseSecs }
-      }
-      return { ...prev, status: "trabajando", pauseStartTime: null }
-    })
-    startInterval()
-  }, [startInterval])
+
+    await syncActiveEntry(nextState, { status: "trabajando" })
+    setState(nextState)
+    startStatusInterval("trabajando")
+  }, [startStatusInterval, syncActiveEntry])
+
+  // Pausa eliminada — conservadas por compatibilidad de interfaz, no hacen nada
+  const pauseWork = useCallback(() => {}, [])
+  const resumeWork = useCallback(() => {}, [])
 
   const buildTimeEntry = useCallback((prev: TimerState): Omit<TimeEntry, "id"> => {
     const now = new Date()
@@ -498,51 +640,61 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const persistEntry = useCallback(async (entryData: Omit<TimeEntry, "id">): Promise<TimeEntry> => {
-    try {
-      const saved = await timeEntriesApi.create(entryData)
-      return saved
-    } catch (err) {
-      console.error("Error persisting time entry:", err)
-      return { id: `local_${Date.now()}`, ...entryData }
-    }
-  }, [])
-
-  const endDay = useCallback(async () => {
+  const endDay = useCallback(async (payload?: EndDayPayload) => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current)
       intervalRef.current = null
     }
 
-    const entryData = buildTimeEntry(stateRef.current)
-    const saved = await persistEntry(entryData)
+    const currentState = stateRef.current
+
+    if (!currentState.activeEntryId) {
+      throw new Error("No existe un registro activo en la base de datos para cerrar esta jornada")
+    }
+
+    const entryData = buildTimeEntry(currentState)
+    const saved = await timeEntriesApi.update(currentState.activeEntryId, {
+      ...entryData,
+      notes: payload?.notes ?? entryData.notes,
+      progressPercentage: payload?.progressPercentage ?? entryData.progressPercentage,
+      progressJustification: payload?.progressJustification ?? entryData.progressJustification,
+      runtimeState: null,
+    })
 
     setState((prev) => ({
       ...prev,
       status: "finalizado",
       showDaySummary: true,
       sessionEntries: [...prev.sessionEntries, saved],
+      activeEntryId: null,
     }))
-  }, [buildTimeEntry, persistEntry])
+  }, [buildTimeEntry])
 
   const switchTask = useCallback(async (newProjectId: string, newTaskId: string) => {
     const current = stateRef.current
-    if (current.status !== "trabajando" && current.status !== "pausado") return
+    if (current.status !== "trabajando") return
 
-    const entryData = buildTimeEntry(current)
-    entryData.notes = `[Parcial] ${entryData.notes}`
-    const saved = await persistEntry(entryData)
+    if (!current.activeEntryId) {
+      throw new Error("No existe un registro activo en la base de datos para cambiar de tarea")
+    }
 
-    setState((prev) => ({
-      ...prev,
+    const nextState: TimerState = {
+      ...current,
       currentProjectId: newProjectId,
       currentTaskId: newTaskId,
       showSwitchTaskDialog: false,
-      sessionEntries: [...prev.sessionEntries, saved],
       progressNotes: [],
       manualProgressPercentage: 0,
-    }))
-  }, [buildTimeEntry, persistEntry])
+    }
+
+    await syncActiveEntry(nextState, {
+      projectId: newProjectId,
+      taskId: newTaskId,
+      progressPercentage: 0,
+      progressJustification: "",
+    })
+    setState(nextState)
+  }, [syncActiveEntry])
 
   const openSwitchTaskDialog = useCallback(() => {
     setState((prev) => ({ ...prev, showSwitchTaskDialog: true }))
@@ -565,59 +717,61 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // ── Meeting ──
-  const startMeeting = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current)
-      intervalRef.current = null
+  const startMeeting = useCallback(async () => {
+    const current = stateRef.current
+    if (current.status !== "trabajando") return
+    if (!current.activeEntryId) {
+      throw new Error("No existe un registro activo en la base de datos para iniciar la reunión")
     }
-    const meetingStart = new Date()
-    // Accumulate pause time if we were paused
-    setState((prev) => {
-      let extraPause = 0
-      if (prev.status === "pausado" && prev.pauseStartTime) {
-        extraPause = Date.now() - prev.pauseStartTime.getTime()
-        totalPausedMs.current += extraPause
-      }
-      return {
-        ...prev,
-        status: "reunion" as const,
-        meetingStartTime: meetingStart,
-        meetingCount: prev.meetingCount + 1,
-        pauseStartTime: null,
-      }
-    })
-    // Track meeting elapsed time
-    const meetingStartMs = Date.now()
-    intervalRef.current = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - meetingStartMs) / 1000)
-      setState((prev) => {
-        if (prev.status !== "reunion") return prev
-        return { ...prev, elapsedMeetingSeconds: prev.elapsedMeetingSeconds + 0 } // just keep interval alive
-      })
-    }, 1000)
-  }, [])
 
-  const endMeeting = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current)
       intervalRef.current = null
     }
-    setState((prev) => {
-      if (prev.meetingStartTime) {
-        const meetingDuration = Date.now() - prev.meetingStartTime.getTime()
-        totalPausedMs.current += meetingDuration
-        const totalMeetingSecs = Math.floor(meetingDuration / 1000)
-        return {
-          ...prev,
-          status: "trabajando" as const,
-          meetingStartTime: null,
-          elapsedMeetingSeconds: prev.elapsedMeetingSeconds + totalMeetingSecs,
-        }
-      }
-      return { ...prev, status: "trabajando" as const, meetingStartTime: null }
-    })
-    startInterval()
-  }, [startInterval])
+
+    const meetingStart = new Date()
+    meetingBaseSecondsRef.current = current.elapsedMeetingSeconds
+
+    const nextState: TimerState = {
+      ...current,
+      status: "reunion" as const,
+      meetingStartTime: meetingStart,
+      meetingCount: current.meetingCount + 1,
+    }
+
+    await syncActiveEntry(nextState, { status: "reunion" })
+    setState(nextState)
+    startStatusInterval("reunion")
+  }, [startStatusInterval, syncActiveEntry])
+
+  const endMeeting = useCallback(async () => {
+    const current = stateRef.current
+    if (current.status !== "reunion") return
+    if (!current.meetingStartTime || !current.activeEntryId) {
+      throw new Error("No existe una reunión activa para retomar la jornada")
+    }
+
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+
+    const meetingDuration = Date.now() - current.meetingStartTime.getTime()
+    totalPausedMs.current += meetingDuration
+    const totalMeetingSecs = meetingBaseSecondsRef.current + Math.floor(meetingDuration / 1000)
+    meetingBaseSecondsRef.current = totalMeetingSecs
+
+    const nextState: TimerState = {
+      ...current,
+      status: "trabajando" as const,
+      meetingStartTime: null,
+      elapsedMeetingSeconds: totalMeetingSecs,
+    }
+
+    await syncActiveEntry(nextState, { status: "trabajando" })
+    setState(nextState)
+    startStatusInterval("trabajando")
+  }, [startStatusInterval, syncActiveEntry])
 
   const dismissAutoEndDialog = useCallback(async () => {
     if (intervalRef.current) {
@@ -625,8 +779,17 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       intervalRef.current = null
     }
 
-    const entryData = buildTimeEntry(stateRef.current)
-    const saved = await persistEntry(entryData)
+    const currentState = stateRef.current
+
+    if (!currentState.activeEntryId) {
+      throw new Error("No existe un registro activo en la base de datos para cerrar esta jornada")
+    }
+
+    const entryData = buildTimeEntry(currentState)
+    const saved = await timeEntriesApi.update(currentState.activeEntryId, {
+      ...entryData,
+      runtimeState: null,
+    })
 
     setState((prev) => ({
       ...prev,
@@ -634,78 +797,91 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       showAutoEndDialog: false,
       showDaySummary: true,
       sessionEntries: [...prev.sessionEntries, saved],
+      activeEntryId: null,
     }))
-  }, [buildTimeEntry, persistEntry])
+  }, [buildTimeEntry])
 
-  const continueAsExtra = useCallback(() => {
-    // User chose to continue — mark as extra time
-    setState((prev) => ({
-      ...prev,
+  const continueAsExtra = useCallback(async () => {
+    const current = stateRef.current
+    if (!current.activeEntryId) return
+
+    const nextState: TimerState = {
+      ...current,
       showAutoEndDialog: false,
       isExtraTime: true,
-    }))
-  }, [])
+    }
 
-  const recordHourlyProgress = useCallback((description: string) => {
-    setState((prev) => {
-      if (prev.pendingHourMilestone === null) return prev
+    await syncActiveEntry(nextState)
+    setState(nextState)
+  }, [syncActiveEntry])
 
-      const hour = prev.pendingHourMilestone
-      const percentage = Math.round((hour / 8) * 100 * 10) / 10
+  const recordHourlyProgress = useCallback(async (description: string) => {
+    const current = stateRef.current
+    if (current.pendingHourMilestone === null) return
 
-      const newProgress: HourlyProgress = {
-        hour,
-        timestamp: new Date(),
-        description: description || `Hora ${hour} completada`,
-        percentage,
-      }
+    const hour = current.pendingHourMilestone
+    const percentage = Math.round((hour / 8) * 100 * 10) / 10
+    const newProgress: HourlyProgress = {
+      hour,
+      timestamp: new Date(),
+      description: description || `Hora ${hour} completada`,
+      percentage,
+    }
 
-      return {
-        ...prev,
-        hourlyProgress: [...prev.hourlyProgress, newProgress],
-        showProgressPrompt: false,
-        pendingHourMilestone: null,
-      }
-    })
-  }, [])
+    const nextState: TimerState = {
+      ...current,
+      hourlyProgress: [...current.hourlyProgress, newProgress],
+      showProgressPrompt: false,
+      pendingHourMilestone: null,
+    }
 
-  const dismissProgressPrompt = useCallback(() => {
-    setState((prev) => {
-      if (prev.pendingHourMilestone === null) return prev
+    await syncActiveEntry(nextState)
+    setState(nextState)
+  }, [syncActiveEntry])
 
-      const hour = prev.pendingHourMilestone
-      const percentage = Math.round((hour / 8) * 100 * 10) / 10
+  const dismissProgressPrompt = useCallback(async () => {
+    const current = stateRef.current
+    if (current.pendingHourMilestone === null) return
 
-      const newProgress: HourlyProgress = {
-        hour,
-        timestamp: new Date(),
-        description: `Hora ${hour} completada`,
-        percentage,
-      }
+    const hour = current.pendingHourMilestone
+    const percentage = Math.round((hour / 8) * 100 * 10) / 10
+    const newProgress: HourlyProgress = {
+      hour,
+      timestamp: new Date(),
+      description: `Hora ${hour} completada`,
+      percentage,
+    }
 
-      return {
-        ...prev,
-        hourlyProgress: [...prev.hourlyProgress, newProgress],
-        showProgressPrompt: false,
-        pendingHourMilestone: null,
-      }
-    })
-  }, [])
+    const nextState: TimerState = {
+      ...current,
+      hourlyProgress: [...current.hourlyProgress, newProgress],
+      showProgressPrompt: false,
+      pendingHourMilestone: null,
+    }
 
-  const updateManualProgress = useCallback((percentage: number, note: string) => {
-    setState((prev) => ({
-      ...prev,
-      manualProgressPercentage: Math.min(100, Math.max(0, percentage)),
+    await syncActiveEntry(nextState)
+    setState(nextState)
+  }, [syncActiveEntry])
+
+  const updateManualProgress = useCallback(async (percentage: number, note: string) => {
+    const current = stateRef.current
+    const clampedPercentage = Math.min(100, Math.max(0, percentage))
+    const nextState: TimerState = {
+      ...current,
+      manualProgressPercentage: clampedPercentage,
       progressNotes: [
-        ...prev.progressNotes,
+        ...current.progressNotes,
         {
-          percentage: Math.min(100, Math.max(0, percentage)),
+          percentage: clampedPercentage,
           note,
           timestamp: new Date(),
         },
       ],
-    }))
-  }, [])
+    }
+
+    await syncActiveEntry(nextState)
+    setState(nextState)
+  }, [syncActiveEntry])
 
   const formatTime = useCallback((seconds: number) => {
     const h = Math.floor(seconds / 3600)

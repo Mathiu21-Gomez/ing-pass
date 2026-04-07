@@ -2,14 +2,15 @@
 
 import {
   createContext,
-  useContext,
-  useState,
-  useEffect,
   useCallback,
+  useContext,
+  useEffect,
+  useState,
   type ReactNode,
 } from "react"
+
 import { authClient } from "@/lib/auth-client"
-import { DEFAULT_ROLE_PERMISSIONS, type Module, type Action } from "@/lib/permissions"
+import { type Action, type Module } from "@/lib/permissions"
 
 type UserRole = "admin" | "coordinador" | "trabajador" | "externo"
 
@@ -29,6 +30,8 @@ interface AuthUser {
 interface AuthContextType {
   user: AuthUser | null
   permissions: Set<string>
+  permissionsError: string | null
+  permissionsStatus: "idle" | "loading" | "ready" | "error"
   hasPermission: (module: Module, action: Action) => boolean
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>
   logout: () => Promise<void>
@@ -40,54 +43,74 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 async function fetchPermissions(userId: string): Promise<Set<string>> {
-  try {
-    const res = await fetch(`/api/me/permissions?userId=${userId}`)
-    if (!res.ok) throw new Error("fetch failed")
-    const data = await res.json()
-    return new Set<string>(data.permissions ?? [])
-  } catch {
-    return new Set<string>()
-  }
-}
+  const res = await fetch(`/api/me/permissions?userId=${userId}`)
+  const data = await res.json().catch(() => null)
 
-function getFallbackPermissions(role: string): Set<string> {
-  const perms = DEFAULT_ROLE_PERMISSIONS[role] ?? []
-  return new Set<string>(perms)
+  if (!res.ok) {
+    throw new Error(
+      typeof data?.error === "string"
+        ? data.error
+        : "No se pudieron cargar los permisos desde la base de datos"
+    )
+  }
+
+  return new Set<string>(data?.permissions ?? [])
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [permissions, setPermissions] = useState<Set<string>>(new Set())
+  const [permissionsError, setPermissionsError] = useState<string | null>(null)
+  const [permissionsStatus, setPermissionsStatus] = useState<"idle" | "loading" | "ready" | "error">("idle")
   const [isLoading, setIsLoading] = useState(true)
 
+  const clearPermissionsState = useCallback(() => {
+    setPermissions(new Set())
+    setPermissionsError(null)
+    setPermissionsStatus("idle")
+  }, [])
+
   const loadPermissions = useCallback(async (authUser: AuthUser) => {
-    const fetched = await fetchPermissions(authUser.id)
-    if (fetched.size > 0) {
+    setPermissionsStatus("loading")
+    setPermissionsError(null)
+
+    try {
+      const fetched = await fetchPermissions(authUser.id)
       setPermissions(fetched)
-    } else {
-      // Fallback to role-based permissions if permission tables are not seeded yet
-      setPermissions(getFallbackPermissions(authUser.role))
+      setPermissionsError(null)
+      setPermissionsStatus("ready")
+    } catch (error) {
+      setPermissions(new Set())
+      setPermissionsError(
+        error instanceof Error ? error.message : "No se pudieron cargar los permisos desde la base de datos"
+      )
+      setPermissionsStatus("error")
     }
   }, [])
 
-  // Check for existing session on mount
   useEffect(() => {
     const checkSession = async () => {
       try {
         const { data } = await authClient.getSession()
+
         if (data?.user) {
           const authUser = data.user as unknown as AuthUser
           setUser(authUser)
           await loadPermissions(authUser)
+        } else {
+          setUser(null)
+          clearPermissionsState()
         }
       } catch {
-        // No active session
+        setUser(null)
+        clearPermissionsState()
       } finally {
         setIsLoading(false)
       }
     }
-    checkSession()
-  }, [loadPermissions])
+
+    void checkSession()
+  }, [clearPermissionsState, loadPermissions])
 
   const login = useCallback(
     async (email: string, password: string) => {
@@ -100,6 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (result.data?.user) {
           const authUser = result.data.user as unknown as AuthUser
+
           if (authUser.active === false) {
             await authClient.signOut()
             return {
@@ -107,6 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               error: "Tu cuenta está desactivada. Contacta al administrador.",
             }
           }
+
           setUser(authUser)
           await loadPermissions(authUser)
           return { success: true }
@@ -123,29 +148,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshSession = useCallback(async () => {
     try {
       const { data } = await authClient.getSession()
+
       if (data?.user) {
         const authUser = data.user as unknown as AuthUser
         setUser(authUser)
         await loadPermissions(authUser)
       } else {
         setUser(null)
-        setPermissions(new Set())
+        clearPermissionsState()
       }
     } catch {
-      // Session refresh failed silently
+      setPermissions(new Set())
+      setPermissionsError("No se pudo refrescar la sesión de permisos")
+      setPermissionsStatus("error")
     }
-  }, [loadPermissions])
+  }, [clearPermissionsState, loadPermissions])
 
   const logout = useCallback(async () => {
     await authClient.signOut()
     setUser(null)
-    setPermissions(new Set())
-  }, [])
+    clearPermissionsState()
+  }, [clearPermissionsState])
 
   const hasPermission = useCallback(
-    (module: Module, action: Action) => {
-      return permissions.has(`${module}:${action}`)
-    },
+    (module: Module, action: Action) => permissions.has(`${module}:${action}`),
     [permissions]
   )
 
@@ -154,6 +180,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         permissions,
+        permissionsError,
+        permissionsStatus,
         hasPermission,
         login,
         logout,

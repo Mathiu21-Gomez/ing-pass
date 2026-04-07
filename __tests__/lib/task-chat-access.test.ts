@@ -38,6 +38,18 @@ vi.mock("@/db", () => ({
   },
 }))
 
+vi.mock("@/lib/project-membership-store", () => ({
+  getProjectMembership: vi.fn((projectId: string) => Promise.resolve({
+    projectId,
+    coordinatorIds: ["coord-1"],
+    assignedWorkerIds: ["worker-1"],
+    projectMembers: [
+      { userId: "coord-1", role: "coordinador" },
+      { userId: "worker-1", role: "colaborador" },
+    ],
+  })),
+}))
+
 import {
   createTaskChatNotFoundResponse,
   getTaskChatAccessContext,
@@ -75,6 +87,7 @@ describe("getTaskChatAccessContext", () => {
       taskId: "task-1",
       projectId: "project-1",
       coordinatorId: "coord-1",
+      coordinatorIds: ["coord-1"],
       accessSource: "admin",
     })
   })
@@ -91,36 +104,24 @@ describe("getTaskChatAccessContext", () => {
     const result = await getTaskChatAccessContext("task-1", makeUser("coordinador", "coord-2"))
 
     expect(result.context).toBeNull()
-    expect(result.error).toBeNull()
-    expect(result.maskAsNotFound).toBe(true)
+    expect(result.error?.status).toBe(403)
+    expect(result.maskAsNotFound).toBe(false)
   })
 
-  it("allows trabajador assigned directly to the task", async () => {
-    mockDb.taskAssignmentRows = [{ taskId: "task-1" }]
-
+  it("allows trabajadores con membresia contextual del proyecto", async () => {
     const result = await getTaskChatAccessContext("task-1", makeUser("trabajador", "worker-1"))
 
     expect(result.error).toBeNull()
     expect(result.maskAsNotFound).toBe(false)
-    expect(result.context?.accessSource).toBe("task-assignment")
-  })
-
-  it("allows trabajador through project membership", async () => {
-    mockDb.projectMembershipRows = [{ projectId: "project-1" }]
-
-    const result = await getTaskChatAccessContext("task-1", makeUser("trabajador", "worker-1"))
-
-    expect(result.error).toBeNull()
-    expect(result.maskAsNotFound).toBe(false)
-    expect(result.context?.accessSource).toBe("project-membership")
+    expect(result.context?.accessSource).toBe("project-member")
   })
 
   it("masks task chat for trabajadores outside the task scope", async () => {
     const result = await getTaskChatAccessContext("task-1", makeUser("trabajador", "worker-2"))
 
     expect(result.context).toBeNull()
-    expect(result.error).toBeNull()
-    expect(result.maskAsNotFound).toBe(true)
+    expect(result.error?.status).toBe(403)
+    expect(result.maskAsNotFound).toBe(false)
   })
 
   it("rejects externos with masked not-found semantics", async () => {

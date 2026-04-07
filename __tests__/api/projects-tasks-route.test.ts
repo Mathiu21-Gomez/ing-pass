@@ -3,7 +3,6 @@ import { NextRequest } from "next/server"
 
 let selectQueue: unknown[] = []
 let insertedValues: unknown[] = []
-let transactionCalls = 0
 let transactionInsertOutcomes: Array<Record<string, unknown> | Error | undefined> = []
 
 function takeSelectResult() {
@@ -64,10 +63,7 @@ vi.mock("@/db", () => {
     db: {
       select: createSelectMock(),
       insert: createInsertMock(),
-      transaction: vi.fn(async (callback: (tx: ReturnType<typeof createTransactionClient>) => Promise<unknown>) => {
-        transactionCalls += 1
-        return callback(createTransactionClient())
-      }),
+      transaction: vi.fn(async (callback: (tx: ReturnType<typeof createTransactionClient>) => Promise<unknown>) => callback(createTransactionClient())),
     },
   }
 })
@@ -104,7 +100,6 @@ describe("/api/projects/[id]/tasks hardening", () => {
     vi.clearAllMocks()
     selectQueue = []
     insertedValues = []
-    transactionCalls = 0
     transactionInsertOutcomes = []
 
     vi.mocked(getProjectAccessContext).mockResolvedValue({
@@ -160,7 +155,7 @@ describe("/api/projects/[id]/tasks hardening", () => {
     expect(res.status).toBe(201)
     expect(body.assignedTo).toEqual(["worker-1"])
     expect(body.createdBy).toBe("worker-1")
-    expect(assignmentInsert).toEqual([{ taskId: "task-created", userId: "worker-1" }])
+    expect(assignmentInsert).toEqual([{ taskId: "task-created", userId: "worker-1", role: "primary" }])
   })
 
   it("keeps project membership enforcement for workers", async () => {
@@ -197,7 +192,7 @@ describe("/api/projects/[id]/tasks hardening", () => {
       error: null,
     } as never)
 
-    selectQueue = [[{ userId: "worker-1" }]]
+    selectQueue = [[], [{ id: "worker-2" }]]
 
     const res = await POST(
       new NextRequest("http://localhost/api/projects/project-1/tasks", {
@@ -206,7 +201,7 @@ describe("/api/projects/[id]/tasks hardening", () => {
         body: JSON.stringify({
           name: "Nueva tarea",
           description: "Descripcion valida",
-          assignedTo: ["worker-1", "worker-2"],
+          assignedTo: ["worker-2"],
         }),
       }),
       makeParams()

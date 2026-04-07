@@ -80,8 +80,8 @@ const makeParams = () => ({ params: Promise.resolve({ id: "task-1" }) })
 describe("PATCH /api/tasks/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    rootSelectRows = [{ id: "task-1", name: "Existing task" }]
-    transactionSelectRows = [{ id: "task-1", name: "Existing task" }]
+    rootSelectRows = [{ id: "task-1", name: "Existing task", userId: "worker-1", role: "primary" }]
+    transactionSelectRows = [{ id: "task-1", name: "Existing task", userId: "worker-1", role: "primary" }]
     batchCalls = 0
     deleteWhereCalls = 0
     insertedValues = []
@@ -107,7 +107,7 @@ describe("PATCH /api/tasks/[id]", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         name: "Renamed task",
-        assignedTo: ["worker-1", "worker-1", "worker-2"],
+        assignedTo: ["worker-1", "worker-1"],
       }),
     })
 
@@ -115,10 +115,9 @@ describe("PATCH /api/tasks/[id]", () => {
     const body = await res.json()
 
     expect(res.status).toBe(200)
-    expect(batchCalls).toBe(1)
     expect(deleteWhereCalls).toBe(1)
-    expect(insertedValues[0]).toEqual([{ taskId: "task-1", userId: "worker-1" }, { taskId: "task-1", userId: "worker-2" }])
-    expect(body.assignedTo).toEqual(["worker-1", "worker-2"])
+    expect(insertedValues[0]).toEqual([{ taskId: "task-1", userId: "worker-1", role: "primary" }])
+    expect(body.assignedTo).toEqual(["worker-1"])
   })
 
   it("rejects invalid assignedTo payloads before mutating the task", async () => {
@@ -136,5 +135,46 @@ describe("PATCH /api/tasks/[id]", () => {
     expect(batchCalls).toBe(0)
     expect(deleteWhereCalls).toBe(0)
     expect(insertedValues).toHaveLength(0)
+  })
+
+  it("blocks workers from editing protected task fields", async () => {
+    vi.mocked(getAuthUser).mockResolvedValue({
+      user: makeUser("trabajador", "worker-1"),
+      error: null,
+    } as never)
+
+    const req = new NextRequest("http://localhost/api/tasks/task-1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "Cambio no permitido" }),
+    })
+
+    const res = await PATCH(req, makeParams())
+    const body = await res.json()
+
+    expect(res.status).toBe(403)
+    expect(body.error).toMatch(/solo pueden actualizar el estado o las pautas/i)
+    expect(batchCalls).toBe(0)
+    expect(deleteWhereCalls).toBe(0)
+    expect(insertedValues).toHaveLength(0)
+  })
+
+  it("allows workers to update task guidelines", async () => {
+    vi.mocked(getAuthUser).mockResolvedValue({
+      user: makeUser("trabajador", "worker-1"),
+      error: null,
+    } as never)
+
+    const req = new NextRequest("http://localhost/api/tasks/task-1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ guidelines: "Nuevo contexto" }),
+    })
+
+    const res = await PATCH(req, makeParams())
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.guidelines).toBe("Nuevo contexto")
   })
 })

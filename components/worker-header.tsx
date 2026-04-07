@@ -9,6 +9,7 @@ import { History, ListTodo, LogOut, Home } from "lucide-react"
 import Image from "next/image"
 
 import { TaskNotificationsBell } from "@/components/task-notifications-bell"
+import { WorkdayHeaderStrip } from "@/components/workday-header-strip"
 
 const navItems = [
   { href: "/trabajador/home", label: "Inicio", icon: Home },
@@ -120,9 +121,15 @@ export function WorkerHeader() {
 
         {/* Right side */}
         <div className="flex items-center gap-2">
-          <StatusBadge status={status} />
+          <div className="hidden lg:block">
+            <WorkdayHeaderStrip basePath="/trabajador" />
+          </div>
 
-          <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/8 px-2.5 py-1">
+          <div className="lg:hidden">
+            <StatusBadge status={status} />
+          </div>
+
+          <div className="hidden sm:flex lg:hidden items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/8 px-2.5 py-1">
             <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse-soft" />
             <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">Sistema activo</span>
           </div>

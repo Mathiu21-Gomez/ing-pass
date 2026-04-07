@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation"
+import { ComunicadosPage } from "@/components/comunicados-page"
 
 export default function CoordinadorComunicacionPage() {
-  redirect("/coordinador/bandeja")
+  return <ComunicadosPage canCreate={true} />
 }

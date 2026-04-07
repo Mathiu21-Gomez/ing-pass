@@ -15,14 +15,20 @@ import {
 import { projectSchema } from "@/lib/schemas"
 import { eq, inArray } from "drizzle-orm"
 import { getAuthUser, requireRole } from "@/lib/api-auth"
+import { getProjectMemberships, syncProjectMembers } from "@/lib/project-membership-store"
 
 function toProjectResponse<T extends Record<string, unknown>>(
   project: T,
-  assignedWorkers: string[]
+  assignedWorkers: string[],
+  coordinatorIds: string[],
+  projectMembers?: Array<{ userId: string; role: "coordinador" | "colaborador" | "modelador" }>
 ) {
   return {
     ...project,
+    coordinatorId: coordinatorIds[0] ?? (project.coordinatorId as string),
+    coordinatorIds,
     assignedWorkers,
+    projectMembers: projectMembers ?? [],
     tasks: [],
     documents: [],
     urls: [],
@@ -57,11 +63,17 @@ export async function GET(request: NextRequest) {
 
       const projectIds = allProjects.map((p) => p.id)
 
-      const [allWorkers, allUrls, allTasks, allProjectDocs] = await Promise.all([
+      const [allWorkers, allUrls, allTasks, allProjectDocs, membershipMap] = await Promise.all([
         db.select().from(projectWorkers).where(inArray(projectWorkers.projectId, projectIds)),
         db.select().from(projectUrls).where(inArray(projectUrls.projectId, projectIds)),
         db.select().from(tasks).where(inArray(tasks.projectId, projectIds)),
         db.select().from(documents).where(inArray(documents.projectId, projectIds)),
+        getProjectMemberships(projectIds, {
+          legacyCoordinators: allProjects.map((project) => ({
+            projectId: project.id,
+            coordinatorId: project.coordinatorId,
+          })),
+        }),
       ])
 
       const taskIds = allTasks.map((t) => t.id)
@@ -136,9 +148,14 @@ export async function GET(request: NextRequest) {
 
       const enriched = allProjects.map((project) => {
         const projectTaskList = tasksByProject.get(project.id) ?? []
+        const membership = membershipMap.get(project.id)
+
         return {
           ...project,
-          assignedWorkers: workersByProject.get(project.id) ?? [],
+          coordinatorId: membership?.coordinatorIds[0] ?? project.coordinatorId,
+          coordinatorIds: membership?.coordinatorIds ?? [project.coordinatorId],
+          assignedWorkers: membership?.assignedWorkerIds ?? workersByProject.get(project.id) ?? [],
+          projectMembers: membership?.projectMembers ?? [],
           urls: urlsByProject.get(project.id) ?? [],
           tasks: projectTaskList.map((task) => ({
             ...task,
@@ -172,11 +189,17 @@ export async function GET(request: NextRequest) {
     const projectIds = allProjects.map((p) => p.id)
 
     // Batch fetch: todos los datos relacionados a proyectos en paralelo
-    const [allWorkers, allUrls, allTasks, allProjectDocs] = await Promise.all([
+    const [allWorkers, allUrls, allTasks, allProjectDocs, membershipMap] = await Promise.all([
       db.select().from(projectWorkers).where(inArray(projectWorkers.projectId, projectIds)),
       db.select().from(projectUrls).where(inArray(projectUrls.projectId, projectIds)),
       db.select().from(tasks).where(inArray(tasks.projectId, projectIds)),
       db.select().from(documents).where(inArray(documents.projectId, projectIds)),
+      getProjectMemberships(projectIds, {
+        legacyCoordinators: allProjects.map((project) => ({
+          projectId: project.id,
+          coordinatorId: project.coordinatorId,
+        })),
+      }),
     ])
 
     // Batch fetch: todos los datos relacionados a tareas en paralelo
@@ -254,9 +277,14 @@ export async function GET(request: NextRequest) {
     // Armar respuesta en memoria
     const enriched = allProjects.map((project) => {
       const projectTaskList = tasksByProject.get(project.id) ?? []
+      const membership = membershipMap.get(project.id)
+
       return {
         ...project,
-        assignedWorkers: workersByProject.get(project.id) ?? [],
+        coordinatorId: membership?.coordinatorIds[0] ?? project.coordinatorId,
+        coordinatorIds: membership?.coordinatorIds ?? [project.coordinatorId],
+        assignedWorkers: membership?.assignedWorkerIds ?? workersByProject.get(project.id) ?? [],
+        projectMembers: membership?.projectMembers ?? [],
         urls: urlsByProject.get(project.id) ?? [],
         tasks: projectTaskList.map((task) => ({
           ...task,
@@ -297,11 +325,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { assignedWorkers, ...projectData } = parsed.data
+    const { assignedWorkers, coordinatorIds, coordinatorId, ...projectData } = parsed.data
 
     const [newProject] = await db
       .insert(projects)
-      .values(projectData)
+      .values({
+        ...projectData,
+        coordinatorId,
+      })
       .returning()
 
     if (assignedWorkers.length > 0) {
@@ -313,7 +344,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    return NextResponse.json(toProjectResponse(newProject, assignedWorkers), {
+    await syncProjectMembers({
+      projectId: newProject.id,
+      coordinatorIds,
+      assignedWorkerIds: assignedWorkers,
+    })
+
+    return NextResponse.json(toProjectResponse(newProject, assignedWorkers, coordinatorIds, [
+      ...coordinatorIds.map((userId) => ({ userId, role: "coordinador" as const })),
+      ...assignedWorkers.map((userId) => ({ userId, role: "colaborador" as const })),
+    ]), {
       status: 201,
     })
   } catch (error) {

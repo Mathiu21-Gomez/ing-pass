@@ -62,6 +62,22 @@ vi.mock("@/db", () => ({
   },
 }))
 
+vi.mock("@/lib/project-membership-store", () => ({
+  getProjectMembership: vi.fn((projectId: string, options?: { legacyCoordinatorId?: string | null }) => {
+    const coordinatorId = options?.legacyCoordinatorId ?? "coord-1"
+
+    return Promise.resolve({
+      projectId,
+      coordinatorIds: [coordinatorId],
+      assignedWorkerIds: ["worker-1"],
+      projectMembers: [
+        { userId: coordinatorId, role: "coordinador" },
+        { userId: "worker-1", role: "colaborador" },
+      ],
+    })
+  }),
+}))
+
 import {
   getProjectMessageAccessContext,
   getSessionMessageAccessContext,
@@ -120,7 +136,10 @@ describe("message access helpers", () => {
     )
 
     expect(result.error).toBeNull()
-    expect(result.context).toEqual(mockDb.projectRows[0])
+    expect(result.context).toEqual({
+      ...mockDb.projectRows[0],
+      coordinatorIds: ["coord-1"],
+    })
   })
 
   it("hides project message contexts from unrelated external users", async () => {
@@ -133,16 +152,14 @@ describe("message access helpers", () => {
     expect(result.error?.status).toBe(404)
   })
 
-  it("allows workers with project membership to access task message contexts", async () => {
-    mockDb.projectMembershipRows = [{ projectId: "project-1" }]
-
+  it("allows task message contexts for contextual project members", async () => {
     const result = await getTaskMessageAccessContext(
       "task-1",
       makeUser("trabajador", "worker-1")
     )
 
     expect(result.error).toBeNull()
-    expect(result.context).toEqual(mockDb.taskRows[0])
+    expect(result.context?.projectId).toBe("project-1")
   })
 
   it("hides task message contexts from workers outside the task project", async () => {

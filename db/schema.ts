@@ -70,6 +70,18 @@ export const workerStatusEnum = pgEnum("worker_status", [
 
 export const scheduleTypeEnum = pgEnum("schedule_type", ["fijo", "libre"])
 
+export const projectMemberRoleEnum = pgEnum("project_member_role", [
+  "coordinador",
+  "colaborador",
+  "modelador",
+  "lider",
+])
+
+export const taskAssignmentRoleEnum = pgEnum("task_assignment_role", [
+  "primary",
+  "support",
+])
+
 export const commentParentTypeEnum = pgEnum("comment_parent_type", [
   "task",
   "activity",
@@ -218,6 +230,20 @@ export const projectWorkers = pgTable(
   (table) => [primaryKey({ columns: [table.projectId, table.userId] })],
 )
 
+export const projectMembers = pgTable(
+  "project_members",
+  {
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    role: projectMemberRoleEnum("role").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.projectId, table.userId, table.role] })],
+)
+
 export const projectUrls = pgTable("project_urls", {
   id: uuid("id").defaultRandom().primaryKey(),
   projectId: uuid("project_id")
@@ -276,6 +302,7 @@ export const taskAssignments = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    role: taskAssignmentRoleEnum("role").notNull().default("primary"),
   },
   (table) => [primaryKey({ columns: [table.taskId, table.userId] })],
 )
@@ -313,7 +340,7 @@ export const comments = pgTable("comments", {
 export const documents = pgTable("documents", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: varchar("name", { length: 255 }).notNull(),
-  type: varchar("type", { length: 20 }).notNull(),
+  type: varchar("type", { length: 255 }).notNull(),
   sizeBytes: integer("size_bytes").notNull().default(0),
   uploadedBy: text("uploaded_by")
     .notNull()
@@ -406,6 +433,7 @@ export const taskChatAttachments = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     storageKey: varchar("storage_key", { length: 500 }).notNull(),
+    blobDataBase64: text("blob_data_base64"),
     source: taskChatAttachmentSourceEnum("source").notNull().default("manual"),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -447,6 +475,7 @@ export const timeEntries = pgTable("time_entries", {
   progressPercentage: integer("progress_percentage").notNull().default(0),
   pauseCount: integer("pause_count").notNull().default(0),
   progressJustification: text("progress_justification").default(""),
+  runtimeState: json("runtime_state"),
   editable: boolean("editable").notNull().default(true),
 })
 
@@ -607,6 +636,7 @@ export const userRelations = relations(user, ({ many }) => ({
   coordinatedProjects: many(projects),
   taskAssignments: many(taskAssignments),
   projectAssignments: many(projectWorkers),
+  contextualProjectAssignments: many(projectMembers),
   timeEntries: many(timeEntries),
   comments: many(comments),
   createdTasks: many(tasks),
@@ -653,6 +683,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   }),
   tasks: many(tasks),
   workers: many(projectWorkers),
+  members: many(projectMembers),
   urls: many(projectUrls),
   documents: many(documents),
   timeEntries: many(timeEntries),
@@ -665,6 +696,17 @@ export const projectWorkersRelations = relations(projectWorkers, ({ one }) => ({
   }),
   user: one(user, {
     fields: [projectWorkers.userId],
+    references: [user.id],
+  }),
+}))
+
+export const projectMembersRelations = relations(projectMembers, ({ one }) => ({
+  project: one(projects, {
+    fields: [projectMembers.projectId],
+    references: [projects.id],
+  }),
+  user: one(user, {
+    fields: [projectMembers.userId],
     references: [user.id],
   }),
 }))

@@ -44,7 +44,6 @@ import {
   RefreshCw,
   UtensilsCrossed,
   Users,
-  Coffee,
   Plus,
   Send,
   Loader2,
@@ -55,6 +54,7 @@ import { ImageUpload } from "@/components/image-upload"
 import { ChatPanel } from "@/components/chat-panel"
 import type { CommentAttachment } from "@/lib/types"
 import { canCreateWorkdayTask, getWorkdayTaskCreationHint } from "@/lib/workday-task-permissions"
+import { getProjectCoordinatorIds, isProjectCoordinator } from "@/lib/project-membership"
 
 // ── Task change entry (for logging task switches during the day) ──
 interface TaskChange {
@@ -79,8 +79,6 @@ export function WorkdayPanel({ showPreStart, timerOnly }: WorkdayPanelProps) {
     currentProjectId,
     currentTaskId,
     startDay,
-    pauseWork,
-    resumeWork,
     endDay,
     startLunch,
     endLunch,
@@ -94,6 +92,7 @@ export function WorkdayPanel({ showPreStart, timerOnly }: WorkdayPanelProps) {
 
   const { data: allProjects = [], mutate: mutateProjects } = useSWR<Project[]>('/api/projects')
   const { data: allUsers = [] } = useSWR<User[]>('/api/users')
+  const { data: currentUserProfile } = useSWR<User>(user?.id ? `/api/users/${user.id}` : null)
 
   function setAllProjects(updater: (prev: Project[]) => Project[]) {
     mutateProjects((current) => updater(current ?? []), { revalidate: false })
@@ -105,7 +104,7 @@ export function WorkdayPanel({ showPreStart, timerOnly }: WorkdayPanelProps) {
   const filteredProjects = useMemo(() => {
     if (!user) return []
     if (user.role === "admin") return allProjects.filter(p => p.status === "Activo")
-    if (user.role === "coordinador") return allProjects.filter(p => p.coordinatorId === userId && p.status === "Activo")
+    if (user.role === "coordinador") return allProjects.filter(p => isProjectCoordinator(p, userId) && p.status === "Activo")
     // trabajador
     return allProjects.filter(p => p.assignedWorkers.includes(userId) && p.status === "Activo")
   }, [allProjects, user, userId])
@@ -227,8 +226,13 @@ export function WorkdayPanel({ showPreStart, timerOnly }: WorkdayPanelProps) {
       switchedAt: new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
     }])
     // Reuse the sessionId from pre-start (if already sent) so messages are grouped
-    startDay(selectedProjectId, selectedTaskId, user?.id, preStartSessionId ?? undefined)
-    toast.success("Jornada iniciada")
+    try {
+      await startDay(selectedProjectId, selectedTaskId, user?.id, preStartSessionId ?? undefined)
+      toast.success("Jornada iniciada")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo iniciar la jornada"
+      toast.error(message)
+    }
   }
 
   // ─── Create task ─────────────────────────
@@ -312,26 +316,44 @@ export function WorkdayPanel({ showPreStart, timerOnly }: WorkdayPanelProps) {
     const nextTaskId = newTaskId
     const task = selectedProject?.tasks.find((t) => t.id === nextTaskId)
 
-    setSelectedTaskId(nextTaskId)
-    await switchTask(selectedProjectId, nextTaskId)
-    setTaskChanges((prev) => [...prev, {
-      id: `tc_${Date.now()}`,
-      projectId: selectedProjectId,
-      taskId: nextTaskId,
-      taskName: task?.name ?? "",
-      projectName: selectedProject?.name ?? "",
-      switchedAt: new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
-    }])
-    setShowTaskChangeDialog(false)
-    setNewTaskId("")
-    toast.success("Tarea cambiada — timer sigue corriendo")
+    try {
+      setSelectedTaskId(nextTaskId)
+      await switchTask(selectedProjectId, nextTaskId)
+      setTaskChanges((prev) => [...prev, {
+        id: `tc_${Date.now()}`,
+        projectId: selectedProjectId,
+        taskId: nextTaskId,
+        taskName: task?.name ?? "",
+        projectName: selectedProject?.name ?? "",
+        switchedAt: new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
+      }])
+      setShowTaskChangeDialog(false)
+      setNewTaskId("")
+      toast.success("Tarea cambiada — timer sigue corriendo")
+    } catch (error) {
+      setSelectedTaskId(selectedTaskId)
+      const message = error instanceof Error ? error.message : "No se pudo cambiar la tarea"
+      toast.error(message)
+    }
   }
 
   // ─── End day ────────────────────────
-  function handleEndDay() {
-    endDay()
-    setShowEndDialog(false)
-    toast.success("Jornada finalizada")
+  async function handleEndDay() {
+    try {
+      await endDay({
+        notes: endNotes.trim(),
+        progressPercentage: Number(endProgress),
+        progressJustification: endJustification.trim(),
+      })
+      setShowEndDialog(false)
+      setEndNotes("")
+      setEndProgress("50")
+      setEndJustification("")
+      toast.success("Jornada finalizada")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo finalizar la jornada"
+      toast.error(message)
+    }
   }
 
   async function handleToggleActivity(taskId: string, activityId: string, completed: boolean) {
@@ -365,23 +387,26 @@ export function WorkdayPanel({ showPreStart, timerOnly }: WorkdayPanelProps) {
     }
   }
 
-  const isWorking = status === "trabajando" || status === "colacion" || status === "pausado" || status === "reunion"
-  const canSwitchTask = status === "trabajando" || status === "pausado"
+  const isWorking = status === "trabajando" || status === "colacion" || status === "reunion"
+  const canSwitchTask = status === "trabajando"
   const canStart = status === "inactivo" || status === "finalizado"
 
   // Set schedule end time for auto-finalize
   useEffect(() => {
-    if (!user?.id || allUsers.length === 0) return
-    const me = allUsers.find((u) => u.id === user.id)
-    if (!me?.weeklySchedule?.length) return
+    if (!currentUserProfile?.weeklySchedule?.length) {
+      setScheduleEndTime(null)
+      return
+    }
     // JS getDay: 0=Sun 1=Mon ... 6=Sat → our schema: 0=Mon ... 6=Sun
     const jsDay = new Date().getDay()
     const dayIdx = jsDay === 0 ? 6 : jsDay - 1
-    const todaySchedule = me.weeklySchedule.find((d) => d.dayOfWeek === dayIdx)
+    const todaySchedule = currentUserProfile.weeklySchedule.find((d) => d.dayOfWeek === dayIdx)
     if (todaySchedule?.isWorkingDay) {
       setScheduleEndTime(todaySchedule.endTime)
+      return
     }
-  }, [user?.id, allUsers, setScheduleEndTime])
+    setScheduleEndTime(null)
+  }, [currentUserProfile, setScheduleEndTime])
 
   // ─── Timer-only mode (home page) ─────────────────────
   if (timerOnly) {
@@ -422,22 +447,6 @@ export function WorkdayPanel({ showPreStart, timerOnly }: WorkdayPanelProps) {
                   <Button variant="outline" size="sm" className="gap-1.5" onClick={startLunch}>
                     <UtensilsCrossed className="h-4 w-4" />
                     Colación
-                  </Button>
-                  <Button variant="outline" size="sm" className="gap-1.5" onClick={pauseWork}>
-                    <Coffee className="h-4 w-4" />
-                    Pausa
-                  </Button>
-                  <Button variant="destructive" size="sm" className="gap-1.5" onClick={() => setShowEndDialog(true)}>
-                    <Square className="h-4 w-4" />
-                    Finalizar Día
-                  </Button>
-                </>
-              )}
-              {status === "pausado" && (
-                <>
-                  <Button size="sm" className="gap-1.5" onClick={resumeWork}>
-                    <Play className="h-4 w-4" />
-                    Reanudar
                   </Button>
                   <Button variant="destructive" size="sm" className="gap-1.5" onClick={() => setShowEndDialog(true)}>
                     <Square className="h-4 w-4" />
@@ -624,25 +633,9 @@ export function WorkdayPanel({ showPreStart, timerOnly }: WorkdayPanelProps) {
                       <UtensilsCrossed className="h-4 w-4" />
                       Colación
                     </Button>
-                    <Button variant="outline" size="sm" className="gap-1.5" onClick={pauseWork}>
-                      <Coffee className="h-4 w-4" />
-                      Pausa
-                    </Button>
                     <Button variant="outline" size="sm" className="gap-1.5 text-indigo-600 border-indigo-300 hover:bg-indigo-50 dark:text-indigo-400 dark:border-indigo-700 dark:hover:bg-indigo-950" onClick={startMeeting}>
                       <Users className="h-4 w-4" />
                       Reunión
-                    </Button>
-                    <Button variant="destructive" size="sm" className="gap-1.5" onClick={() => setShowEndDialog(true)}>
-                      <Square className="h-4 w-4" />
-                      Finalizar Día
-                    </Button>
-                  </>
-                )}
-                {status === "pausado" && (
-                  <>
-                    <Button size="sm" className="gap-1.5" onClick={resumeWork}>
-                      <Play className="h-4 w-4" />
-                      Reanudar
                     </Button>
                     <Button variant="destructive" size="sm" className="gap-1.5" onClick={() => setShowEndDialog(true)}>
                       <Square className="h-4 w-4" />
@@ -861,7 +854,10 @@ export function WorkdayPanel({ showPreStart, timerOnly }: WorkdayPanelProps) {
                         <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                           <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Coordinador</p>
                           <p className="text-xs font-medium">
-                            {allUsers.find((u: User) => u.id === selectedProject.coordinatorId)?.name?.split(" ").slice(0, 2).join(" ") ?? "—"}
+                            {getProjectCoordinatorIds(selectedProject)
+                              .map((id) => allUsers.find((u: User) => u.id === id)?.name?.split(" ").slice(0, 2).join(" "))
+                              .filter(Boolean)
+                              .join(", ") || "—"}
                           </p>
                         </div>
                         <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">

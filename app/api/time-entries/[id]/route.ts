@@ -101,11 +101,14 @@ export async function PATCH(
         ...(body.lunchEndTime !== undefined && { lunchEndTime: body.lunchEndTime }),
         ...(body.endTime !== undefined && { endTime: body.endTime }),
         ...(body.effectiveHours !== undefined && { effectiveHours: body.effectiveHours }),
+        ...(body.projectId !== undefined && { projectId: body.projectId }),
+        ...(body.taskId !== undefined && { taskId: body.taskId }),
         ...(body.status !== undefined && { status: body.status }),
         ...(body.notes !== undefined && { notes: body.notes }),
         ...(body.progressPercentage !== undefined && { progressPercentage: body.progressPercentage }),
         ...(body.pauseCount !== undefined && { pauseCount: body.pauseCount }),
         ...(body.progressJustification !== undefined && { progressJustification: body.progressJustification }),
+        ...(body.runtimeState !== undefined && { runtimeState: body.runtimeState }),
       })
       .where(eq(timeEntries.id, id))
       .returning()

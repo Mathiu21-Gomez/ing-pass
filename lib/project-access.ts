@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server"
-import { and, eq } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 
 import { db } from "@/db"
-import { clients, projects, projectWorkers } from "@/db/schema"
+import { clients, projects } from "@/db/schema"
 import type { ApiUser } from "@/lib/api-auth"
+import { getProjectMembership } from "@/lib/project-membership-store"
 
 export interface ProjectAccessContext {
   projectId: string
   coordinatorId: string
+  coordinatorIds: string[]
   clientEmail: string
 }
 
@@ -51,14 +53,22 @@ export async function getProjectAccessContext(
   }
 
   const projectContext = projectRows[0]
+  const membership = await getProjectMembership(projectContext.projectId, {
+    legacyCoordinatorId: projectContext.coordinatorId,
+  })
+  const contextualProjectContext = {
+    ...projectContext,
+    coordinatorId: membership.coordinatorIds[0] ?? projectContext.coordinatorId,
+    coordinatorIds: membership.coordinatorIds,
+  }
 
   if (user.role === "admin") {
-    return { context: projectContext, error: null }
+    return { context: contextualProjectContext, error: null }
   }
 
   if (user.role === "coordinador") {
-    if (projectContext.coordinatorId === user.id) {
-      return { context: projectContext, error: null }
+    if (membership.coordinatorIds.includes(user.id)) {
+      return { context: contextualProjectContext, error: null }
     }
 
     return {
@@ -69,7 +79,7 @@ export async function getProjectAccessContext(
 
   if (user.role === "externo") {
     if (projectContext.clientEmail === user.email) {
-      return { context: projectContext, error: null }
+      return { context: contextualProjectContext, error: null }
     }
 
     return {
@@ -78,21 +88,11 @@ export async function getProjectAccessContext(
     }
   }
 
-  if (user.role === "trabajador") {
-    const membershipRows = await db
-      .select({ projectId: projectWorkers.projectId })
-      .from(projectWorkers)
-      .where(
-        and(
-          eq(projectWorkers.projectId, projectContext.projectId),
-          eq(projectWorkers.userId, user.id)
-        )
-      )
+  if (membership.projectMembers.some((member) => member.userId === user.id)) {
+    return { context: contextualProjectContext, error: null }
+  }
 
-    if (membershipRows.length > 0) {
-      return { context: projectContext, error: null }
-    }
-
+  if (user.role === "trabajador" || user.role === "coordinador") {
     return {
       context: null,
       error: notFound("Proyecto no encontrado"),

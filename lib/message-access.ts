@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server"
-import { and, eq } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 
 import { db } from "@/db"
-import { clients, messages, projects, projectWorkers, taskAssignments, tasks } from "@/db/schema"
+import { clients, messages, projects, tasks } from "@/db/schema"
 import type { ApiUser } from "@/lib/api-auth"
+import { getProjectMembership } from "@/lib/project-membership-store"
 
 export interface ProjectMessageAccessContext {
   projectId: string
   coordinatorId: string
+  coordinatorIds: string[]
   clientEmail: string
 }
 
@@ -15,6 +17,7 @@ export interface TaskMessageAccessContext {
   taskId: string
   projectId: string
   coordinatorId: string
+  coordinatorIds: string[]
   clientEmail: string
 }
 
@@ -70,25 +73,22 @@ export async function getProjectMessageAccessContext(
   }
 
   const projectContext = projectRows[0]
-
-  if (user.role === "admin") {
-    return { context: projectContext, error: null }
+  const membership = await getProjectMembership(projectContext.projectId, {
+    legacyCoordinatorId: projectContext.coordinatorId,
+  })
+  const contextualProjectContext = {
+    ...projectContext,
+    coordinatorId: membership.coordinatorIds[0] ?? projectContext.coordinatorId,
+    coordinatorIds: membership.coordinatorIds,
   }
 
-  if (user.role === "coordinador") {
-    if (projectContext.coordinatorId === user.id) {
-      return { context: projectContext, error: null }
-    }
-
-    return {
-      context: null,
-      error: notFound("Proyecto no encontrado"),
-    }
+  if (user.role === "admin") {
+    return { context: contextualProjectContext, error: null }
   }
 
   if (user.role === "externo") {
     if (projectContext.clientEmail === user.email) {
-      return { context: projectContext, error: null }
+      return { context: contextualProjectContext, error: null }
     }
 
     return {
@@ -97,16 +97,11 @@ export async function getProjectMessageAccessContext(
     }
   }
 
-  if (user.role === "trabajador") {
-    const membership = await db
-      .select({ projectId: projectWorkers.projectId })
-      .from(projectWorkers)
-      .where(and(eq(projectWorkers.projectId, projectId), eq(projectWorkers.userId, user.id)))
+  if (membership.projectMembers.some((member) => member.userId === user.id)) {
+    return { context: contextualProjectContext, error: null }
+  }
 
-    if (membership.length > 0) {
-      return { context: projectContext, error: null }
-    }
-
+  if (user.role === "trabajador" || user.role === "coordinador") {
     return {
       context: null,
       error: notFound("Proyecto no encontrado"),
@@ -143,25 +138,22 @@ export async function getTaskMessageAccessContext(
   }
 
   const taskContext = taskRows[0]
-
-  if (user.role === "admin") {
-    return { context: taskContext, error: null }
+  const membership = await getProjectMembership(taskContext.projectId, {
+    legacyCoordinatorId: taskContext.coordinatorId,
+  })
+  const contextualTaskContext = {
+    ...taskContext,
+    coordinatorId: membership.coordinatorIds[0] ?? taskContext.coordinatorId,
+    coordinatorIds: membership.coordinatorIds,
   }
 
-  if (user.role === "coordinador") {
-    if (taskContext.coordinatorId === user.id) {
-      return { context: taskContext, error: null }
-    }
-
-    return {
-      context: null,
-      error: notFound("Tarea no encontrada"),
-    }
+  if (user.role === "admin") {
+    return { context: contextualTaskContext, error: null }
   }
 
   if (user.role === "externo") {
     if (taskContext.clientEmail === user.email) {
-      return { context: taskContext, error: null }
+      return { context: contextualTaskContext, error: null }
     }
 
     return {
@@ -170,29 +162,11 @@ export async function getTaskMessageAccessContext(
     }
   }
 
-  if (user.role === "trabajador") {
-    const [projectMembership, taskMembership] = await Promise.all([
-      db
-        .select({ projectId: projectWorkers.projectId })
-        .from(projectWorkers)
-        .where(
-          and(
-            eq(projectWorkers.projectId, taskContext.projectId),
-            eq(projectWorkers.userId, user.id)
-          )
-        ),
-      db
-        .select({ taskId: taskAssignments.taskId })
-        .from(taskAssignments)
-        .where(
-          and(eq(taskAssignments.taskId, taskId), eq(taskAssignments.userId, user.id))
-        ),
-    ])
+  if (membership.projectMembers.some((member) => member.userId === user.id)) {
+    return { context: contextualTaskContext, error: null }
+  }
 
-    if (projectMembership.length > 0 || taskMembership.length > 0) {
-      return { context: taskContext, error: null }
-    }
-
+  if (user.role === "trabajador" || user.role === "coordinador") {
     return {
       context: null,
       error: notFound("Tarea no encontrada"),
@@ -250,6 +224,17 @@ export async function getSessionMessageAccessContext(
       return { context: sessionContext, error: null, exists: true }
     }
 
+    for (const row of sessionRows) {
+      if (!row.projectId) continue
+      const membership = await getProjectMembership(row.projectId, {
+        legacyCoordinatorId: row.coordinatorId,
+      })
+
+      if (membership.projectMembers.some((member) => member.userId === user.id)) {
+        return { context: sessionContext, error: null, exists: true }
+      }
+    }
+
     return {
       context: null,
       error: notFound("Sesión de mensajes no encontrada"),
@@ -260,6 +245,17 @@ export async function getSessionMessageAccessContext(
   if (user.role === "trabajador") {
     if (sessionRows.some((row) => row.fromUserId === user.id)) {
       return { context: sessionContext, error: null, exists: true }
+    }
+
+    for (const row of sessionRows) {
+      if (!row.projectId) continue
+      const membership = await getProjectMembership(row.projectId, {
+        legacyCoordinatorId: row.coordinatorId,
+      })
+
+      if (membership.projectMembers.some((member) => member.userId === user.id)) {
+        return { context: sessionContext, error: null, exists: true }
+      }
     }
 
     return {

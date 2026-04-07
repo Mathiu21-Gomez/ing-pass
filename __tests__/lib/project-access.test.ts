@@ -21,6 +21,18 @@ vi.mock("@/db", () => ({
   },
 }))
 
+vi.mock("@/lib/project-membership-store", () => ({
+  getProjectMembership: vi.fn(() => Promise.resolve({
+    projectId: "project-1",
+    coordinatorIds: ["coord-1"],
+    assignedWorkerIds: ["worker-1"],
+    projectMembers: [
+      { userId: "coord-1", role: "coordinador" },
+      { userId: "worker-1", role: "colaborador" },
+    ],
+  })),
+}))
+
 import { getProjectAccessContext } from "@/lib/project-access"
 
 const makeUser = (role: string, id = "user-1", email = "test@test.com") => ({
@@ -47,7 +59,10 @@ describe("getProjectAccessContext", () => {
     )
 
     expect(result.error).toBeNull()
-    expect(result.context).toEqual(baseProjectContext)
+    expect(result.context).toEqual({
+      ...baseProjectContext,
+      coordinatorIds: ["coord-1"],
+    })
   })
 
   it("conceals projects from unrelated external users", async () => {
@@ -72,6 +87,7 @@ describe("getProjectAccessContext", () => {
     expect(result.context).toEqual({
       projectId: "project-1",
       coordinatorId: "coord-1",
+      coordinatorIds: ["coord-1"],
       clientEmail: "client@test.com",
     })
   })

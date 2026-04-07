@@ -11,16 +11,22 @@ import {
   documents,
 } from "@/db/schema"
 import { projectSchema } from "@/lib/schemas"
-import { and, eq } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 import { getAuthUser, requireRole } from "@/lib/api-auth"
+import { getProjectMembership, syncProjectMembers } from "@/lib/project-membership-store"
 
 function toProjectResponse<T extends Record<string, unknown>>(
   project: T,
-  assignedWorkers: string[]
+  assignedWorkers: string[],
+  coordinatorIds: string[],
+  projectMembers?: Array<{ userId: string; role: "coordinador" | "colaborador" | "modelador" | "lider" }>
 ) {
   return {
     ...project,
+    coordinatorId: coordinatorIds[0] ?? (project.coordinatorId as string),
+    coordinatorIds,
     assignedWorkers,
+    projectMembers: projectMembers ?? [],
     tasks: [],
     documents: [],
     urls: [],
@@ -74,25 +80,13 @@ export async function GET(
       )
     }
 
-    const workers = await db
-      .select()
-      .from(projectWorkers)
-      .where(eq(projectWorkers.projectId, id))
-
-    const urls = await db
-      .select()
-      .from(projectUrls)
-      .where(eq(projectUrls.projectId, id))
-
-    const projectTasks = await db
-      .select()
-      .from(tasks)
-      .where(eq(tasks.projectId, id))
-
-    const projectDocs = await db
-      .select()
-      .from(documents)
-      .where(eq(documents.projectId, id))
+    const [workers, urls, projectTasks, projectDocs, membership] = await Promise.all([
+      db.select().from(projectWorkers).where(eq(projectWorkers.projectId, id)),
+      db.select().from(projectUrls).where(eq(projectUrls.projectId, id)),
+      db.select().from(tasks).where(eq(tasks.projectId, id)),
+      db.select().from(documents).where(eq(documents.projectId, id)),
+      getProjectMembership(id, { legacyCoordinatorId: project[0].coordinatorId }),
+    ])
 
     const enrichedTasks = await Promise.all(
       projectTasks.map(async (task) => {
@@ -122,7 +116,12 @@ export async function GET(
 
     return NextResponse.json({
       ...project[0],
-      assignedWorkers: workers.map((w) => w.userId),
+      coordinatorId: membership.coordinatorIds[0] ?? project[0].coordinatorId,
+      coordinatorIds: membership.coordinatorIds,
+      assignedWorkers: membership.assignedWorkerIds.length > 0
+        ? membership.assignedWorkerIds
+        : workers.map((w) => w.userId),
+      projectMembers: membership.projectMembers,
       urls: urls.map((u) => ({ id: u.id, label: u.label, url: u.url })),
       tasks: enrichedTasks,
       documents: projectDocs,
@@ -155,8 +154,20 @@ export async function PATCH(
       const progress = Math.min(Math.max(Math.round(body.progress), 0), 100)
       const [updated] = await db.update(projects).set({ progress }).where(eq(projects.id, id)).returning()
       if (!updated) return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 })
-      const workers = await db.select().from(projectWorkers).where(eq(projectWorkers.projectId, id))
-      return NextResponse.json(toProjectResponse(updated, workers.map((w) => w.userId)))
+      const [workers, membership] = await Promise.all([
+        db.select().from(projectWorkers).where(eq(projectWorkers.projectId, id)),
+        getProjectMembership(id, { legacyCoordinatorId: updated.coordinatorId }),
+      ])
+      return NextResponse.json(
+        toProjectResponse(
+          updated,
+          membership.assignedWorkerIds.length > 0
+            ? membership.assignedWorkerIds
+            : workers.map((w) => w.userId),
+          membership.coordinatorIds,
+          membership.projectMembers
+        )
+      )
     }
 
     const parsed = projectSchema.safeParse(body)
@@ -168,11 +179,15 @@ export async function PATCH(
       )
     }
 
-    const { assignedWorkers, ...projectData } = parsed.data
+    const { assignedWorkers, coordinatorIds, coordinatorId, ...projectData } = parsed.data
+    const leaderIds: string[] = Array.isArray(body.leaderIds) ? body.leaderIds : []
 
     const updated = await db
       .update(projects)
-      .set(projectData)
+      .set({
+        ...projectData,
+        coordinatorId,
+      })
       .where(eq(projects.id, id))
       .returning()
 
@@ -183,20 +198,53 @@ export async function PATCH(
       )
     }
 
-    await db
-      .delete(projectWorkers)
+    // Diff-based sync: only add/remove what changed (avoids unnecessary churn)
+    const existingWorkerRows = await db
+      .select({ userId: projectWorkers.userId })
+      .from(projectWorkers)
       .where(eq(projectWorkers.projectId, id))
 
-    if (assignedWorkers.length > 0) {
+    const existingIds = new Set(existingWorkerRows.map((r) => r.userId))
+    const nextIds = new Set(assignedWorkers)
+
+    const toAdd = assignedWorkers.filter((uid) => !existingIds.has(uid))
+    const toRemove = [...existingIds].filter((uid) => !nextIds.has(uid))
+
+    if (toRemove.length > 0) {
+      await db
+        .delete(projectWorkers)
+        .where(and(eq(projectWorkers.projectId, id), inArray(projectWorkers.userId, toRemove)))
+    }
+
+    if (toAdd.length > 0) {
       await db.insert(projectWorkers).values(
-        assignedWorkers.map((userId) => ({
-          projectId: id,
-          userId,
-        }))
+        toAdd.map((userId) => ({ projectId: id, userId }))
       )
     }
 
-    return NextResponse.json(toProjectResponse(updated[0], assignedWorkers))
+    const currentMembership = await getProjectMembership(id, { legacyCoordinatorId: updated[0].coordinatorId })
+    const modelerIds = currentMembership.projectMembers
+      .filter((member) => member.role === "modelador")
+      .map((member) => member.userId)
+
+    await syncProjectMembers({
+      projectId: id,
+      coordinatorIds,
+      assignedWorkerIds: assignedWorkers,
+      leaderIds,
+      modelerIds,
+    })
+
+    const leaderSet = new Set(leaderIds)
+    const modelerSet = new Set(modelerIds)
+    return NextResponse.json(toProjectResponse(updated[0], assignedWorkers, coordinatorIds, [
+      ...coordinatorIds.map((userId) => ({ userId, role: "coordinador" as const })),
+      ...leaderIds.map((userId) => ({ userId, role: "lider" as const })),
+      ...modelerIds.map((userId) => ({ userId, role: "modelador" as const })),
+      ...assignedWorkers
+        .filter((userId) => !leaderSet.has(userId) && !modelerSet.has(userId))
+        .map((userId) => ({ userId, role: "colaborador" as const })),
+    ]))
   } catch (error) {
     console.error("Error updating project:", error)
     return NextResponse.json(

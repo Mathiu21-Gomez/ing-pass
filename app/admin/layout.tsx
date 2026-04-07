@@ -6,8 +6,10 @@ import { useAuth } from "@/lib/contexts/auth-context"
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import { AdminSidebar } from "@/components/admin-sidebar"
+import { PermissionsStatusBanner } from "@/components/permissions-status-banner"
 import { TimerAlerts } from "@/components/timer-alerts"
 import { TaskNotificationsBell } from "@/components/task-notifications-bell"
+import { WorkdayHeaderStrip } from "@/components/workday-header-strip"
 import { toast } from "sonner"
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -74,18 +76,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     const segments = pathname.split("/").filter(Boolean)
     const page = segments[segments.length - 1] ?? "dashboard"
     const titles: Record<string, string> = {
-      home: "Inicio",
       dashboard: "Dashboard",
-      "mi-jornada": "Mi Jornada",
+      calendario: "Calendario",
+      comunicacion: "Comunicados",
       "mi-historial": "Mi Historial",
       historial: "Historial Equipo",
       tareas: "Tareas",
-      bandeja: "Bandeja",
       clientes: "Clientes",
       usuarios: "Usuarios",
       proyectos: "Proyectos",
-      notas: "Notas",
-      comunicacion: "Comunicación",
       roles: "Roles y Permisos",
     }
     return titles[page] ?? "Panel"
@@ -95,6 +94,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <div className="flex h-screen overflow-hidden bg-background">
       <AdminSidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
+        <PermissionsStatusBanner />
 
         {/* Top bar corporativo */}
         <header className="header-glass hidden md:flex h-14 items-center justify-between px-6">
@@ -105,18 +105,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </h2>
           </div>
           <div className="flex items-center gap-2.5">
-            <div className="flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/8 px-2.5 py-1">
-              <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse-soft" />
-              <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">Sistema activo</span>
-            </div>
+            <WorkdayHeaderStrip basePath="/admin" />
             <TaskNotificationsBell basePath="/admin/tareas" />
-            <span className="text-[11px] text-muted-foreground/50 select-none tabular-nums">
-              {new Date().toLocaleDateString("es-CL", {
-                weekday: "long",
-                day: "numeric",
-                month: "long",
-              })}
-            </span>
           </div>
         </header>
 

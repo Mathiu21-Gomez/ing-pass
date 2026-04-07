@@ -1,7 +1,8 @@
 import { and, eq, inArray } from "drizzle-orm"
 
 import { db } from "@/db"
-import { projectWorkers, projects, tasks, user as userTable } from "@/db/schema"
+import { tasks, user as userTable } from "@/db/schema"
+import { getProjectMembership } from "@/lib/project-membership-store"
 
 export interface TaskMentionableUser {
   id: string
@@ -19,30 +20,22 @@ export async function getTaskChatMentionableUsers(
   const taskRows = await db
     .select({
       projectId: tasks.projectId,
-      coordinatorId: projects.coordinatorId,
     })
     .from(tasks)
-    .innerJoin(projects, eq(tasks.projectId, projects.id))
     .where(eq(tasks.id, taskId))
-    .limit(1)
 
   const taskRow = taskRows[0]
   if (!taskRow) return []
 
-  const [workerRows, adminRows] = await Promise.all([
-    db
-      .select({ userId: projectWorkers.userId })
-      .from(projectWorkers)
-      .where(eq(projectWorkers.projectId, taskRow.projectId)),
-    db
+  const membership = await getProjectMembership(taskRow.projectId)
+
+  const adminRows = await db
       .select({ id: userTable.id, name: userTable.name })
       .from(userTable)
-      .where(and(eq(userTable.active, true), eq(userTable.role, "admin"))),
-  ])
+      .where(and(eq(userTable.active, true), eq(userTable.role, "admin")))
 
   const projectMemberIds = [
-    taskRow.coordinatorId,
-    ...workerRows.map((worker) => worker.userId),
+    ...membership.projectMembers.map((member) => member.userId),
   ].filter((value): value is string => Boolean(value))
 
   const projectMemberRows =

@@ -58,6 +58,7 @@ describe("timer-context persistence", () => {
         progressNotes: [],
         sessionEntries: [],
         activeSessionId: "session-1",
+        activeEntryId: "entry-1",
       },
     }
 
@@ -105,6 +106,7 @@ describe("timer-context persistence", () => {
         progressNotes: [],
         sessionEntries: [],
         activeSessionId: "session-1",
+        activeEntryId: "entry-1",
       },
     }
 
@@ -113,6 +115,7 @@ describe("timer-context persistence", () => {
     expect(restored.elapsedWorkSeconds).toBe(3600)
     expect(restored.elapsedPauseSeconds).toBe(1800)
     expect(restored.activeSessionId).toBe("session-1")
+    expect(restored.activeEntryId).toBe("entry-1")
     expect(restored.pauseStartTime?.toISOString()).toBe("2026-03-26T11:45:00.000Z")
   })
 })

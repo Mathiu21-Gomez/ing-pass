@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/db"
-import { tasks, taskAssignments, activities, documents, comments, taskTags, tags, notifications } from "@/db/schema"
-import { and, eq } from "drizzle-orm"
+import { tasks, taskAssignments, activities, documents, comments, taskTags, tags, notifications, projectWorkers, user as userTable } from "@/db/schema"
+import { and, eq, inArray } from "drizzle-orm"
 import { getAuthUser } from "@/lib/api-auth"
 import { getTaskAccessContext } from "@/lib/task-access"
+
+const SINGLE_ASSIGNEE_ERROR = "Cada tarea puede tener solo 1 trabajador responsable"
 
 async function createTaskAssignedNotifications(input: {
   taskId: string
@@ -38,6 +40,8 @@ function uniqueStrings(values: string[]) {
   return [...new Set(values)]
 }
 
+const WORKER_EDITABLE_FIELDS = new Set(["guidelines", "status"])
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -47,8 +51,8 @@ export async function GET(
 
   try {
     const { id } = await params
-    const { error: accessError } = await getTaskAccessContext(id, authUser)
-    if (accessError) return accessError
+    const accessResult = await getTaskAccessContext(id, authUser)
+    if (accessResult.error) return accessResult.error
 
     const task = await db.select().from(tasks).where(eq(tasks.id, id))
 
@@ -60,7 +64,7 @@ export async function GET(
     }
 
     const assigns = await db
-      .select()
+      .select({ userId: taskAssignments.userId, role: taskAssignments.role })
       .from(taskAssignments)
       .where(eq(taskAssignments.taskId, id))
 
@@ -87,7 +91,8 @@ export async function GET(
 
     return NextResponse.json({
       ...task[0],
-      assignedTo: assigns.map((a) => a.userId),
+      assignedTo: assigns.filter((a) => a.role === "primary").map((a) => a.userId),
+      supportIds: assigns.filter((a) => a.role === "support").map((a) => a.userId),
       activities: taskActivities,
       documents: taskDocs,
       comments: taskComments,
@@ -111,10 +116,30 @@ export async function PATCH(
 
   try {
     const { id } = await params
-    const { error: accessError } = await getTaskAccessContext(id, authUser)
-    if (accessError) return accessError
+    const accessResult = await getTaskAccessContext(id, authUser)
+    if (accessResult.error) return accessResult.error
 
     const body = await request.json()
+
+    if (authUser.role === "trabajador") {
+      const attemptedFields = Object.keys(body).filter((key) => body[key] !== undefined)
+      const invalidFields = attemptedFields.filter((key) => !WORKER_EDITABLE_FIELDS.has(key))
+
+      if (invalidFields.length > 0) {
+        return NextResponse.json(
+          { error: "Los trabajadores solo pueden actualizar el estado o las pautas de la tarea" },
+          { status: 403 }
+        )
+      }
+
+      // Workers cannot set a task as finalizado — only coordinators/admins close tasks
+      if (body.status === "finalizado") {
+        return NextResponse.json(
+          { error: "Los trabajadores no pueden finalizar tareas. Usá 'Listo para revisión'." },
+          { status: 403 }
+        )
+      }
+    }
 
     if (body.assignedTo !== undefined && !isStringArray(body.assignedTo)) {
       return NextResponse.json(
@@ -123,9 +148,106 @@ export async function PATCH(
       )
     }
 
+    if (body.supportIds !== undefined && !isStringArray(body.supportIds)) {
+      return NextResponse.json(
+        { error: "supportIds debe ser un array de strings" },
+        { status: 400 }
+      )
+    }
+
     const assignedTo = body.assignedTo !== undefined
       ? uniqueStrings(body.assignedTo)
       : undefined
+
+    const supportIds = body.supportIds !== undefined
+      ? uniqueStrings(body.supportIds)
+      : undefined
+
+    // Primary assignee: max 1
+    if (assignedTo && assignedTo.length > 1) {
+      return NextResponse.json(
+        { error: SINGLE_ASSIGNEE_ERROR },
+        { status: 400 }
+      )
+    }
+
+    // Validate primary assignees
+    if (assignedTo && assignedTo.length > 0) {
+      const [validMembershipRows, validWorkerRows] = await Promise.all([
+        db
+          .select({ userId: projectWorkers.userId })
+          .from(projectWorkers)
+          .where(
+            and(
+              eq(projectWorkers.projectId, accessResult.context.projectId),
+              inArray(projectWorkers.userId, assignedTo)
+            )
+          ),
+        db
+          .select({ id: userTable.id })
+          .from(userTable)
+          .where(
+            and(
+              inArray(userTable.id, assignedTo),
+              eq(userTable.active, true),
+              eq(userTable.role, "trabajador")
+            )
+          ),
+      ])
+
+      if (validMembershipRows.length !== assignedTo.length) {
+        return NextResponse.json(
+          { error: "Hay trabajadores que no pertenecen al proyecto" },
+          { status: 400 }
+        )
+      }
+
+      if (validWorkerRows.length !== assignedTo.length) {
+        return NextResponse.json(
+          { error: "Solo se puede asignar un trabajador activo por tarea" },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Validate support workers
+    if (supportIds && supportIds.length > 0) {
+      const [validSupportMembership, validSupportWorkers] = await Promise.all([
+        db
+          .select({ userId: projectWorkers.userId })
+          .from(projectWorkers)
+          .where(
+            and(
+              eq(projectWorkers.projectId, accessResult.context.projectId),
+              inArray(projectWorkers.userId, supportIds)
+            )
+          ),
+        db
+          .select({ id: userTable.id })
+          .from(userTable)
+          .where(
+            and(
+              inArray(userTable.id, supportIds),
+              eq(userTable.active, true),
+              eq(userTable.role, "trabajador")
+            )
+          ),
+      ])
+
+      if (validSupportMembership.length !== supportIds.length) {
+        return NextResponse.json(
+          { error: "Hay apoyos que no pertenecen al proyecto" },
+          { status: 400 }
+        )
+      }
+
+      if (validSupportWorkers.length !== supportIds.length) {
+        return NextResponse.json(
+          { error: "Solo se pueden asignar trabajadores activos como apoyo" },
+          { status: 400 }
+        )
+      }
+    }
 
     const updateData: Record<string, unknown> = {}
     if (body.name !== undefined) updateData.name = body.name
@@ -135,126 +257,93 @@ export async function PATCH(
     if (body.dueDate !== undefined) updateData.dueDate = body.dueDate || null
     if (body.status !== undefined) updateData.status = body.status
 
-    if (Object.keys(updateData).length === 0 && !assignedTo) {
+    const hasAssignmentChange = assignedTo !== undefined || supportIds !== undefined
+
+    if (Object.keys(updateData).length === 0 && !hasAssignmentChange) {
       return NextResponse.json(
         { error: "No hay campos para actualizar" },
         { status: 400 }
       )
     }
 
-    // Capture current assignments before mutation for diff
-    let previousAssignedIds: string[] = []
-    if (assignedTo !== undefined) {
+    // Capture current assignments before mutation for diff (notifications)
+    let previousPrimaryIds: string[] = []
+    if (hasAssignmentChange) {
       const prevRows = await db
-        .select({ userId: taskAssignments.userId })
+        .select({ userId: taskAssignments.userId, role: taskAssignments.role })
         .from(taskAssignments)
         .where(eq(taskAssignments.taskId, id))
-      previousAssignedIds = prevRows.map((r) => r.userId)
+      previousPrimaryIds = prevRows.filter((r) => r.role === "primary").map((r) => r.userId)
+    }
+
+    // Build the new full assignment list (primary + support)
+    let newAssignmentRows: { taskId: string; userId: string; role: "primary" | "support" }[] | undefined
+    if (hasAssignmentChange) {
+      // Load current assignments to merge with partial updates
+      const currentRows = await db
+        .select({ userId: taskAssignments.userId, role: taskAssignments.role })
+        .from(taskAssignments)
+        .where(eq(taskAssignments.taskId, id))
+
+      const currentPrimary = currentRows.filter((r) => r.role === "primary").map((r) => r.userId)
+      const currentSupport = currentRows.filter((r) => r.role === "support").map((r) => r.userId)
+
+      const finalPrimary = assignedTo ?? currentPrimary
+      const finalSupport = supportIds ?? currentSupport
+
+      newAssignmentRows = [
+        ...finalPrimary.map((userId) => ({ taskId: id, userId, role: "primary" as const })),
+        ...finalSupport.map((userId) => ({ taskId: id, userId, role: "support" as const })),
+      ]
     }
 
     let currentTask
 
-    if (assignedTo !== undefined) {
-      if (Object.keys(updateData).length > 0) {
-        if (assignedTo.length > 0) {
-          const [updated] = await db.batch([
-            db
-              .update(tasks)
-              .set(updateData)
-              .where(eq(tasks.id, id))
-              .returning(),
-            db.delete(taskAssignments).where(eq(taskAssignments.taskId, id)),
-            db.insert(taskAssignments).values(
-              assignedTo.map((userId) => ({ taskId: id, userId }))
-            ),
-          ])
-
-          if (updated.length === 0) {
-            currentTask = null
-          } else {
-            currentTask = updated[0]
-          }
-        } else {
-          const [updated] = await db.batch([
-            db
-              .update(tasks)
-              .set(updateData)
-              .where(eq(tasks.id, id))
-              .returning(),
-            db.delete(taskAssignments).where(eq(taskAssignments.taskId, id)),
-          ])
-
-          if (updated.length === 0) {
-            currentTask = null
-          } else {
-            currentTask = updated[0]
-          }
-        }
-      } else if (assignedTo.length > 0) {
-        const [existing] = await db.batch([
-          db.select().from(tasks).where(eq(tasks.id, id)),
-          db.delete(taskAssignments).where(eq(taskAssignments.taskId, id)),
-          db.insert(taskAssignments).values(
-            assignedTo.map((userId) => ({ taskId: id, userId }))
-          ),
-        ])
-
-        if (existing.length === 0) {
-          currentTask = null
-        } else {
-          currentTask = existing[0]
-        }
-      } else {
-        const [existing] = await db.batch([
-          db.select().from(tasks).where(eq(tasks.id, id)),
-          db.delete(taskAssignments).where(eq(taskAssignments.taskId, id)),
-        ])
-
-        if (existing.length === 0) {
-          currentTask = null
-        } else {
-          currentTask = existing[0]
-        }
-      }
-    } else if (Object.keys(updateData).length > 0) {
+    if (Object.keys(updateData).length > 0) {
       const updated = await db
         .update(tasks)
         .set(updateData)
         .where(eq(tasks.id, id))
         .returning()
 
-      if (updated.length === 0) {
-        currentTask = null
-      } else {
-        currentTask = updated[0]
-      }
+      currentTask = updated[0] ?? null
     } else {
       const existing = await db.select().from(tasks).where(eq(tasks.id, id))
+      currentTask = existing[0] ?? null
+    }
 
-      if (existing.length === 0) {
-        currentTask = null
-      } else {
-        currentTask = existing[0]
+    if (newAssignmentRows !== undefined) {
+      await db.delete(taskAssignments).where(eq(taskAssignments.taskId, id))
+      if (newAssignmentRows.length > 0) {
+        await db.insert(taskAssignments).values(newAssignmentRows)
       }
     }
 
-    const updatedTask = currentTask
-      ? {
-          ...currentTask,
-          assignedTo,
-        }
-      : null
-
-    if (!updatedTask) {
+    if (!currentTask) {
       return NextResponse.json(
         { error: "Tarea no encontrada" },
         { status: 404 }
       )
     }
 
-    // Notify newly added assignees (diff against previous state)
+    // Build response with split assignment roles
+    const finalAssignRows = await db
+      .select({ userId: taskAssignments.userId, role: taskAssignments.role })
+      .from(taskAssignments)
+      .where(eq(taskAssignments.taskId, id))
+
+    const finalPrimaryIds = finalAssignRows.filter((r) => r.role === "primary").map((r) => r.userId)
+    const finalSupportIds = finalAssignRows.filter((r) => r.role === "support").map((r) => r.userId)
+
+    const updatedTask = {
+      ...currentTask,
+      assignedTo: finalPrimaryIds,
+      supportIds: finalSupportIds,
+    }
+
+    // Notify newly added primary assignees
     if (assignedTo !== undefined && assignedTo.length > 0) {
-      const prevSet = new Set(previousAssignedIds)
+      const prevSet = new Set(previousPrimaryIds)
       const newlyAssigned = assignedTo.filter((uid) => !prevSet.has(uid))
       if (newlyAssigned.length > 0) {
         void createTaskAssignedNotifications({

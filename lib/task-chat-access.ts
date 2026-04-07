@@ -1,20 +1,21 @@
 import { NextResponse } from "next/server"
-import { and, eq } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 
 import { db } from "@/db"
-import { projectWorkers, projects, taskAssignments, tasks } from "@/db/schema"
+import { projects, tasks } from "@/db/schema"
 import type { ApiUser } from "@/lib/api-auth"
+import { getProjectMembership } from "@/lib/project-membership-store"
 
 export type TaskChatAccessSource =
   | "admin"
   | "coordinator"
-  | "project-membership"
-  | "task-assignment"
+  | "project-member"
 
 export interface TaskChatAccessContext {
   taskId: string
   projectId: string
   coordinatorId: string
+  coordinatorIds: string[]
   accessSource: TaskChatAccessSource
 }
 
@@ -76,11 +77,19 @@ export async function getTaskChatAccessContext(
   }
 
   const taskContext = taskRows[0]
+  const membership = await getProjectMembership(taskContext.projectId, {
+    legacyCoordinatorId: taskContext.coordinatorId,
+  })
+  const contextualTaskContext = {
+    ...taskContext,
+    coordinatorId: membership.coordinatorIds[0] ?? taskContext.coordinatorId,
+    coordinatorIds: membership.coordinatorIds,
+  }
 
   if (user.role === "admin") {
     return {
       context: {
-        ...taskContext,
+        ...contextualTaskContext,
         accessSource: "admin",
       },
       error: null,
@@ -88,61 +97,26 @@ export async function getTaskChatAccessContext(
     }
   }
 
-  if (user.role === "coordinador") {
-    if (taskContext.coordinatorId === user.id) {
-      return {
-        context: {
-          ...taskContext,
-          accessSource: "coordinator",
-        },
-        error: null,
-        maskAsNotFound: false,
-      }
+  if (membership.coordinatorIds.includes(user.id)) {
+    return {
+      context: {
+        ...contextualTaskContext,
+        accessSource: "coordinator",
+      },
+      error: null,
+      maskAsNotFound: false,
     }
-
-    return maskAsNotFound()
   }
 
-  if (user.role === "trabajador") {
-    const [projectMembershipRows, taskAssignmentRows] = await Promise.all([
-      db
-        .select({ projectId: projectWorkers.projectId })
-        .from(projectWorkers)
-        .where(
-          and(
-            eq(projectWorkers.projectId, taskContext.projectId),
-            eq(projectWorkers.userId, user.id)
-          )
-        ),
-      db
-        .select({ taskId: taskAssignments.taskId })
-        .from(taskAssignments)
-        .where(and(eq(taskAssignments.taskId, taskId), eq(taskAssignments.userId, user.id))),
-    ])
-
-    if (taskAssignmentRows.length > 0) {
-      return {
-        context: {
-          ...taskContext,
-          accessSource: "task-assignment",
-        },
-        error: null,
-        maskAsNotFound: false,
-      }
+  if (membership.projectMembers.some((member) => member.userId === user.id)) {
+    return {
+      context: {
+        ...contextualTaskContext,
+        accessSource: "project-member",
+      },
+      error: null,
+      maskAsNotFound: false,
     }
-
-    if (projectMembershipRows.length > 0) {
-      return {
-        context: {
-          ...taskContext,
-          accessSource: "project-membership",
-        },
-        error: null,
-        maskAsNotFound: false,
-      }
-    }
-
-    return maskAsNotFound()
   }
 
   if (user.role === "externo") {

@@ -13,7 +13,7 @@ export const runtime = "nodejs"
  * Returns users that can be @mentioned in this task's chat:
  * - All admins (active)
  * - The project coordinator
- * - Workers assigned to the project
+ * - Workers assigned directly to the task
  * Excludes the requesting user.
  */
 export async function GET(

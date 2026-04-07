@@ -26,6 +26,7 @@ import {
 import { FolderKanban, CheckCircle2, Users, TrendingUp, ListChecks } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useCallback, useMemo } from "react"
+import { isProjectCoordinator } from "@/lib/project-membership"
 
 const PIE_COLORS = ["hsl(221, 83%, 53%)", "hsl(35, 92%, 55%)"]
 
@@ -38,7 +39,10 @@ export default function CoordinadorDashboard() {
     const { data: allUsers } = useApiData(fetchUsers, [] as User[])
 
     // Only projects assigned to this coordinator
-    const myProjects = useMemo(() => allProjects.filter((p) => p.coordinatorId === user?.id), [allProjects, user])
+    const myProjects = useMemo(
+        () => allProjects.filter((p) => isProjectCoordinator(p, user?.id)),
+        [allProjects, user]
+    )
 
     // Summary stats
     const allMyTasks = myProjects.flatMap((p) => p.tasks)

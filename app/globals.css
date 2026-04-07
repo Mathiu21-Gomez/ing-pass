@@ -421,26 +421,9 @@
   border-color: hsl(var(--border) / 0.4);
 }
 
-/* Sidebar nav item — active glow refinado */
-.nav-item-active {
-  position: relative;
-  background: linear-gradient(
-    135deg,
-    hsl(var(--sidebar-accent)) 0%,
-    hsl(var(--sidebar-primary) / 0.08) 100%
-  );
-}
-.nav-item-active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 70%;
-  border-radius: 0 3px 3px 0;
-  background: linear-gradient(180deg, hsl(var(--sidebar-primary)), hsl(var(--sidebar-primary) / 0.6));
-  box-shadow: 2px 0 8px hsl(var(--sidebar-primary) / 0.3);
+/* Sidebar refinado — background del nav area */
+.sidebar-nav-area {
+  background: hsl(var(--sidebar-accent) / 0.45);
 }
 
 /* Header glassmorphism refinado */
@@ -557,4 +540,47 @@
 /* Improved stagger for large grids */
 .stagger-children > *:nth-child(n+9) {
   animation-delay: 480ms;
+}
+
+/* ============================================
+   SPRINT 6 — New component polish additions
+   ============================================ */
+
+/* Pulse soft animation for live status dots */
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.animate-pulse-soft {
+  animation: pulse-soft 2s ease-in-out infinite;
+}
+
+/* Workday strip pill refinement */
+.workday-pill {
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+/* Activity item hover refinement */
+.activity-item {
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.activity-item:hover {
+  border-color: hsl(var(--border) / 0.8);
+  background-color: hsl(var(--muted) / 0.3);
+}
+
+/* Calendar day hover improved */
+.calendar-day-task {
+  position: relative;
+}
+.calendar-day-task::after {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: hsl(var(--primary));
 }

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/db"
 import { timeEntries, user, projects, tasks } from "@/db/schema"
-import { eq, desc, and } from "drizzle-orm"
+import { eq, desc, and, inArray } from "drizzle-orm"
 import { getAuthUser } from "@/lib/api-auth"
+
+const ACTIVE_TIMER_STATUSES = ["trabajando", "colacion", "pausado", "reunion"] as const
 
 export async function GET(request: NextRequest) {
   const { user: authUser, error } = await getAuthUser(request)
@@ -18,6 +20,7 @@ export async function GET(request: NextRequest) {
     const projectId = searchParams.get("projectId")
     const date = searchParams.get("date")
     const status = searchParams.get("status")
+    const active = searchParams.get("active") === "true"
 
     const rows = await db
       .select({
@@ -32,11 +35,12 @@ export async function GET(request: NextRequest) {
         endTime: timeEntries.endTime,
         effectiveHours: timeEntries.effectiveHours,
         status: timeEntries.status,
-        notes: timeEntries.notes,
-        progressPercentage: timeEntries.progressPercentage,
-        pauseCount: timeEntries.pauseCount,
-        progressJustification: timeEntries.progressJustification,
-        editable: timeEntries.editable,
+          notes: timeEntries.notes,
+          progressPercentage: timeEntries.progressPercentage,
+          pauseCount: timeEntries.pauseCount,
+          progressJustification: timeEntries.progressJustification,
+          runtimeState: timeEntries.runtimeState,
+          editable: timeEntries.editable,
         userName: user.name,
         userPosition: user.position,
         projectName: projects.name,
@@ -51,10 +55,11 @@ export async function GET(request: NextRequest) {
           userId ? eq(timeEntries.userId, userId) : undefined,
           projectId ? eq(timeEntries.projectId, projectId) : undefined,
           date ? eq(timeEntries.date, date) : undefined,
+          active ? inArray(timeEntries.status, ACTIVE_TIMER_STATUSES) : undefined,
           status ? eq(timeEntries.status, status as "trabajando" | "colacion" | "pausado" | "finalizado" | "inactivo") : undefined,
         )
       )
-      .orderBy(desc(timeEntries.date))
+      .orderBy(desc(timeEntries.date), desc(timeEntries.startTime))
 
     const enriched = rows.map((r) => ({
       ...r,
@@ -95,6 +100,7 @@ export async function POST(request: NextRequest) {
       progressPercentage,
       pauseCount,
       progressJustification,
+      runtimeState,
     } = body
 
     if (!projectId || !taskId || !date || !startTime) {
@@ -121,6 +127,7 @@ export async function POST(request: NextRequest) {
         progressPercentage: progressPercentage ?? 0,
         pauseCount: pauseCount ?? 0,
         progressJustification: progressJustification ?? "",
+        runtimeState: runtimeState ?? null,
         editable: true,
       })
       .returning()

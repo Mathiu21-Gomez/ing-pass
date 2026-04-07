@@ -35,6 +35,7 @@ export interface RestoredTimerState {
   progressNotes: TimerProgressNote[]
   sessionEntries: TimeEntry[]
   activeSessionId: string | null
+  activeEntryId: string | null
 }
 
 export interface TimerSnapshot {
@@ -77,6 +78,7 @@ export interface TimerSnapshot {
     progressNotes: Array<Omit<TimerProgressNote, "timestamp"> & { timestamp: string }>
     sessionEntries: TimeEntry[]
     activeSessionId: string | null
+    activeEntryId: string | null
   }
 }
 
@@ -112,6 +114,7 @@ export function isValidTimerSnapshot(snapshot: unknown, userId: string): snapsho
   if (typeof state.currentProjectId !== "string" || !state.currentProjectId) return false
   if (typeof state.currentTaskId !== "string" || !state.currentTaskId) return false
   if (typeof state.activeSessionId !== "string" || !state.activeSessionId) return false
+  if (typeof state.activeEntryId !== "string" || !state.activeEntryId) return false
   if (typeof state.userId !== "string" || state.userId !== userId) return false
   if (typeof state.startTime !== "string" || !state.startTime) return false
 
@@ -199,5 +202,6 @@ export function restoreTimerState(snapshot: TimerSnapshot): RestoredTimerState {
     })),
     sessionEntries: snapshot.state.sessionEntries,
     activeSessionId: snapshot.state.activeSessionId,
+    activeEntryId: snapshot.state.activeEntryId,
   }
 }

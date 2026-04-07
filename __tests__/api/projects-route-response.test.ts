@@ -11,8 +11,26 @@ vi.mock("@/lib/api-auth", () => ({
   requireRole: vi.fn(() => null),
 }))
 
+vi.mock("@/lib/project-membership-store", () => ({
+  getProjectMembership: vi.fn(() => Promise.resolve({
+    projectId: "project-1",
+    coordinatorIds: ["coord-1"],
+    assignedWorkerIds: ["worker-1"],
+    projectMembers: [
+      { userId: "coord-1", role: "coordinador" },
+      { userId: "worker-1", role: "colaborador" },
+    ],
+  })),
+  syncProjectMembers: vi.fn(() => Promise.resolve(true)),
+}))
+
 vi.mock("@/db", () => ({
   db: {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => Promise.resolve([])),
+      })),
+    })),
     insert: vi.fn(() => {
       insertCalls += 1
 

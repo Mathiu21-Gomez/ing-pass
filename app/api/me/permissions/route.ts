@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/db"
-import { userRoles, rolePermissions, permissions, roles, user } from "@/db/schema"
-import { eq } from "drizzle-orm"
+import { userRoles, rolePermissions, permissions, user } from "@/db/schema"
+import { eq, inArray } from "drizzle-orm"
 import { getAuthUser } from "@/lib/api-auth"
-import { DEFAULT_ROLE_PERMISSIONS } from "@/lib/permissions"
 
 export async function GET(request: NextRequest) {
   const { user: authUser, error } = await getAuthUser(request)
@@ -17,15 +16,19 @@ export async function GET(request: NextRequest) {
       .where(eq(userRoles.userId, authUser.id))
 
     if (assignedRoles.length === 0) {
-      // No roles in new system — fall back to legacy role field
       const userRecord = await db
         .select({ role: user.role })
         .from(user)
         .where(eq(user.id, authUser.id))
 
-      const legacyRole = userRecord[0]?.role ?? "trabajador"
-      const fallbackPerms = DEFAULT_ROLE_PERMISSIONS[legacyRole] ?? []
-      return NextResponse.json({ permissions: fallbackPerms, source: "fallback" })
+      return NextResponse.json(
+        {
+          error: "El usuario no tiene roles sincronizados en la base de datos.",
+          code: "USER_ROLES_MISSING",
+          legacyRole: userRecord[0]?.role ?? authUser.role,
+        },
+        { status: 409 }
+      )
     }
 
     // Get all permissions for all assigned roles
@@ -38,28 +41,20 @@ export async function GET(request: NextRequest) {
       })
       .from(rolePermissions)
       .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
-      .where(
-        roleIds.length === 1
-          ? eq(rolePermissions.roleId, roleIds[0])
-          : // For multiple roles, we fetch each individually and merge
-            eq(rolePermissions.roleId, roleIds[0])
-      )
+      .where(inArray(rolePermissions.roleId, roleIds))
 
-    // If user has multiple roles, fetch the rest
-    const allPermRows = [...permRows]
-    if (roleIds.length > 1) {
-      for (let i = 1; i < roleIds.length; i++) {
-        const extra = await db
-          .select({ module: permissions.module, action: permissions.action })
-          .from(rolePermissions)
-          .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
-          .where(eq(rolePermissions.roleId, roleIds[i]))
-        allPermRows.push(...extra)
-      }
+    if (permRows.length === 0) {
+      return NextResponse.json(
+        {
+          error: "Los roles asignados no tienen permisos sembrados en la base de datos.",
+          code: "ROLE_PERMISSIONS_MISSING",
+        },
+        { status: 409 }
+      )
     }
 
     // Deduplicate
-    const permSet = new Set(allPermRows.map((p) => `${p.module}:${p.action}`))
+    const permSet = new Set(permRows.map((p) => `${p.module}:${p.action}`))
 
     return NextResponse.json({
       permissions: Array.from(permSet),
@@ -67,8 +62,9 @@ export async function GET(request: NextRequest) {
     })
   } catch (err) {
     console.error("Error fetching user permissions:", err)
-    // Graceful fallback — if tables don't exist yet return role-based perms
-    const fallbackPerms = DEFAULT_ROLE_PERMISSIONS[authUser.role] ?? []
-    return NextResponse.json({ permissions: fallbackPerms, source: "fallback" })
+    return NextResponse.json(
+      { error: "Error al obtener permisos desde la base de datos", code: "PERMISSIONS_DB_ERROR" },
+      { status: 500 }
+    )
   }
 }

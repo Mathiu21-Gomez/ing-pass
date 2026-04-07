@@ -55,7 +55,10 @@ vi.mock("@/db", () => ({
   },
 }))
 
-import { stageTaskChatAttachment } from "@/lib/task-chat-storage"
+import {
+  createDatabaseTaskChatStorageAdapter,
+  stageTaskChatAttachment,
+} from "@/lib/task-chat-storage"
 
 describe("stageTaskChatAttachment", () => {
   beforeEach(() => {
@@ -64,7 +67,7 @@ describe("stageTaskChatAttachment", () => {
     mockDb.insertCalls = []
   })
 
-  it("creates a pending attachment, stores the blob privately, and bootstraps the thread", async () => {
+  it("creates a pending attachment, stores the blob in DB metadata, and bootstraps the thread", async () => {
     const file = new File([new Uint8Array([1, 2, 3])], "evidence.png", { type: "image/png" })
 
     const result = await stageTaskChatAttachment({
@@ -82,8 +85,8 @@ describe("stageTaskChatAttachment", () => {
       source: "manual",
       status: "pending",
     })
-    expect(writeFileMock).toHaveBeenCalledTimes(1)
-    expect(mkdirMock).toHaveBeenCalledTimes(1)
+    expect(writeFileMock).not.toHaveBeenCalled()
+    expect(mkdirMock).not.toHaveBeenCalled()
     expect(mockDb.insertCalls).toHaveLength(3)
     expect(mockDb.insertCalls[0]).toMatchObject({
       createdBy: "user-1",
@@ -98,6 +101,7 @@ describe("stageTaskChatAttachment", () => {
       uploadedBy: "user-1",
     })
     expect(mockDb.insertCalls[2]).toMatchObject({
+      blobDataBase64: "AQID",
       documentId: "document-1",
       id: "11111111-1111-4111-8111-111111111111",
       messageId: null,
@@ -122,9 +126,29 @@ describe("stageTaskChatAttachment", () => {
 
     expect(mockDb.insertCalls).toHaveLength(2)
     expect(mockDb.insertCalls[1]).toMatchObject({
+      blobDataBase64: "AQID",
       source: "clipboard",
       threadId: "thread-existing",
     })
+  })
+
+  it("creates deterministic DB-backed payloads without touching the filesystem", async () => {
+    const adapter = createDatabaseTaskChatStorageAdapter()
+    const file = new File([new Uint8Array([4, 5, 6])], "report.pdf", { type: "application/pdf" })
+
+    const result = await adapter.stage({
+      attachmentId: "attachment-1",
+      file,
+      taskId: "task/unsafe",
+      threadId: "thread unsafe",
+    })
+
+    expect(result).toEqual({
+      blobDataBase64: "BAUG",
+      storageKey: "task-unsafe\\thread-unsafe\\attachment-1.pdf",
+    })
+    expect(writeFileMock).not.toHaveBeenCalled()
+    expect(mkdirMock).not.toHaveBeenCalled()
   })
 
   it("rejects unsupported files before touching storage", async () => {

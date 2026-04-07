@@ -22,6 +22,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useState, useCallback, useMemo } from "react"
 import type { Task, TaskStatus, Project, User } from "@/lib/types"
+import { isProjectCoordinator } from "@/lib/project-membership"
 
 const statusConfig: Record<TaskStatus, { label: string; color: string; bg: string }> = {
     pendiente: { label: "Abiertas", color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" },
@@ -43,7 +44,10 @@ export default function CoordinadorEquipoPage() {
     const { data: allProjects } = useApiData(fetchProjects, [] as Project[])
     const { data: allUsers } = useApiData(fetchUsers, [] as User[])
 
-    const myProjects = useMemo(() => allProjects.filter((p) => p.coordinatorId === user?.id), [allProjects, user])
+    const myProjects = useMemo(
+        () => allProjects.filter((p) => isProjectCoordinator(p, user?.id)),
+        [allProjects, user]
+    )
     const projectsToShow = filterProject === "all" ? myProjects : myProjects.filter((p) => p.id === filterProject)
 
     // Get all tasks with project info

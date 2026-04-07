@@ -19,6 +19,7 @@ import {
     User as UserIcon,
     Download,
     FileSpreadsheet,
+    FileBarChart,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
@@ -42,6 +43,9 @@ export default function HistorialPage() {
     const [startDate, setStartDate] = useState<string>("")
     const [endDate, setEndDate] = useState<string>("")
     const [showExport, setShowExport] = useState(false)
+    const [reportMonth, setReportMonth] = useState<string>(String(new Date().getMonth() + 1))
+    const [reportYear, setReportYear] = useState<string>(String(new Date().getFullYear()))
+    const [reportLoading, setReportLoading] = useState(false)
 
     const fetchProjects = useCallback(() => projectsApi.getAll(), [])
     const fetchUsers = useCallback(() => usersApi.getAll(), [])
@@ -61,6 +65,29 @@ export default function HistorialPage() {
         setExpandedWorker(expandedWorker === workerId ? null : workerId)
     }
 
+    async function handleDownloadMonthlyReport() {
+        setReportLoading(true)
+        try {
+            const params = new URLSearchParams({ month: reportMonth, year: reportYear })
+            const res = await fetch(`/api/export/monthly-report?${params.toString()}`)
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}))
+                console.error("Error generando reporte:", body?.error)
+                return
+            }
+            const blob = await res.blob()
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement("a")
+            const monthNames = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"]
+            a.href = url
+            a.download = `reporte_mensual_${monthNames[parseInt(reportMonth) - 1]}_${reportYear}.xlsx`
+            a.click()
+            URL.revokeObjectURL(url)
+        } finally {
+            setReportLoading(false)
+        }
+    }
+
 
     return (
         <div className="flex flex-col gap-6">
@@ -76,6 +103,57 @@ export default function HistorialPage() {
                     Exportar
                 </Button>
             </div>
+
+            {/* Monthly report generator */}
+            <Card className="border-dashed">
+                <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                        <FileBarChart className="h-4 w-4 text-primary" />
+                        Reporte Mensual
+                    </CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <div className="flex flex-wrap items-end gap-3">
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-medium text-muted-foreground">Mes</label>
+                            <Select value={reportMonth} onValueChange={setReportMonth}>
+                                <SelectTrigger className="w-36">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"].map((name, i) => (
+                                        <SelectItem key={i + 1} value={String(i + 1)}>{name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-medium text-muted-foreground">Año</label>
+                            <Select value={reportYear} onValueChange={setReportYear}>
+                                <SelectTrigger className="w-28">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {Array.from({ length: 4 }, (_, i) => new Date().getFullYear() - i).map((y) => (
+                                        <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <Button
+                            onClick={() => { void handleDownloadMonthlyReport() }}
+                            disabled={reportLoading}
+                            className="gap-2"
+                        >
+                            <FileSpreadsheet className="h-4 w-4" />
+                            {reportLoading ? "Generando..." : "Descargar Excel"}
+                        </Button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground">
+                        Incluye todos los trabajadores con horario fijo. Excluye usuarios con horario libre.
+                    </p>
+                </CardContent>
+            </Card>
 
             {/* Filters */}
             <div className="flex flex-col sm:flex-row gap-4">
